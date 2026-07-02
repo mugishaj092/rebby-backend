@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "nodemon",
     "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     "start": "node dist/server.js",
     "lint": "eslint .",
@@ -31,6 +31,7 @@
     "@types/supertest": "^6.0.2",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^9.1.0",
+    "nodemon": "^3.1.14",
     "prettier": "^3.4.2",
     "supertest": "^7.0.0",
     "tsc-alias": "^1.8.10",

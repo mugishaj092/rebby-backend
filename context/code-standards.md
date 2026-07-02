@@ -278,7 +278,8 @@ Approved dependencies:
 - `vitest` (or `jest`), `supertest`
 - `eslint`, `prettier`, `typescript`
 - `cors`, `morgan`, `dotenv` — CORS handling, dev request logging, and `.env` loading (spec 01 §3, §2)
-- `tsx` — TS watch-mode runner for `npm run dev` (spec 01 §1)
+- `tsx` — TS execution runner, invoked by `nodemon` for `npm run dev` (spec 01 §1)
+- `nodemon` — dev-mode file watcher/auto-restart for `npm run dev`, configured via `nodemon.json` to exec `tsx src/server.ts` on changes under `src/`
 - `tsc-alias` — rewrites `@/*` path aliases in compiled output; `tsc` alone does not do this (spec 01 §1)
 - `typescript-eslint`, `@eslint/js`, `eslint-config-prettier` — flat ESLint config + TS support, and disabling stylistic rules that conflict with Prettier (spec 01 §1)
 - `@types/node`, `@types/express`, `@types/cors`, `@types/morgan`, `@types/supertest` — type definitions for the above
