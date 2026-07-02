@@ -8,8 +8,14 @@ async function main(): Promise<void> {
 
   const app = createApp();
 
-  app.listen(env.PORT, () => {
-    console.log(`REBY backend listening on port ${env.PORT} [${env.NODE_ENV}]`);
+  await new Promise<void>((resolve, reject) => {
+    const server = app.listen(env.PORT, () => {
+      server.off('error', reject);
+      console.log(`REBY backend listening on port ${env.PORT} [${env.NODE_ENV}]`);
+      resolve();
+    });
+
+    server.once('error', reject);
   });
 }
 
