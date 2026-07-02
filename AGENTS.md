@@ -28,19 +28,19 @@ Read these before writing code. They are the source of truth; when in doubt, the
 
 | Order | File | What it gives you |
 |---|---|---|
-| 1 | `docs/project-overview.md` | What the platform is, the modules, the core flows, scope |
-| 2 | `docs/architecture.md` | Stack, **feature-based folder structure**, layering, access-level design, the stock invariant |
-| 3 | `docs/code-standards.md` | The rules you follow every session — TypeScript, Express, Prisma, models/schemas/repos/services patterns |
-| 4 | `docs/build-plan.md` | The ordered task list — what to build next and how to verify it |
-| 5 | `docs/progress-tracker.md` | What is done, in progress, and next. **Update this after every task.** |
+| 1 | `context/project-overview.md` | What the platform is, the modules, the core flows, scope |
+| 2 | `context/architecture.md` | Stack, **feature-based folder structure**, layering, access-level design, the stock invariant |
+| 3 | `context/code-standards.md` | The rules you follow every session — TypeScript, Express, Prisma, models/schemas/repos/services patterns |
+| 4 | `context/build-plan.md` | The ordered task list — what to build next and how to verify it |
+| 5 | `context/progress-tracker.md` | What is done, in progress, and next. **Update this after every task.** |
 
 Reference material (read when relevant to the task):
 
 | File | When to read it |
 |---|---|
-| `docs/schema.prisma` | Full schema reference — match your models to this exactly |
+| `context/schema.prisma` | Full schema reference — match your models to this exactly |
 
-> Adjust the `docs/` prefix to wherever you place these files. If they live at the repo root, drop the prefix.
+> Adjust the `context/` prefix to wherever you place these files. If they live at the repo root, drop the prefix.
 
 ---
 
