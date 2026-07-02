@@ -7,8 +7,8 @@ Update this file after every completed task. Any AI agent reading this should im
 ## Current Status
 
 **Phase:** 1 — Foundation
-**Last completed:** 03 Core Middleware & Error Handling
-**Next:** 04 Identity Models + Migration
+**Last completed:** 04 Identity Models + Migration
+**Next:** 05 Auth Integration (Clerk)
 
 ---
 
@@ -18,7 +18,7 @@ Update this file after every completed task. Any AI agent reading this should im
 - [x] 01 Project Skeleton
 - [x] 02 Prisma Setup & Base Schema
 - [x] 03 Core Middleware & Error Handling
-- [ ] 04 Identity Models + Migration
+- [x] 04 Identity Models + Migration
 - [ ] 05 Auth Integration (Clerk)
 
 ### Phase 2 — Catalog
@@ -91,5 +91,15 @@ Update this file after every completed task. Any AI agent reading this should im
 - **[03]** `errorHandler`'s log context prefix uses `[<method> <path>]` (e.g. `[GET /orders/123]`) rather than the `code-standards.md` example's feature-scoped `[orders.service.createOrder]` format — the middleware is generic and has no feature/service context to draw on at that layer. Feature-level services should still log with the `[feature.service.function]` pattern from within their own `catch` blocks before rethrowing; the request-scoped prefix here is specific to the top-level handler.
 - **[03]** Added a `res.headersSent` guard at the top of `errorHandler` (defers to `next(err)` instead of writing a response) — not called out explicitly in spec 03, but standard Express guidance for error-handling middleware to avoid a hard crash (`ERR_HTTP_HEADERS_SENT`) if an error occurs after a response has already started streaming. Nothing streams yet, but this middleware is permanent infrastructure every future feature routes through. Added post-review, with a unit test (`tests/core/middleware/errorHandler.unit.test.ts`) covering the guard directly since it can't be exercised via a clean Supertest round trip.
 - **[03]** `validate(...)` throws `ValidationError` synchronously from inside the middleware function body (rather than calling `next(err)`), matching spec 03 §4's literal wording ("on failure, throws `ValidationError`"). This relies on Express 4's built-in behavior of catching synchronous throws in middleware/route handlers automatically — safe here since `validate` is fully synchronous. Future async controllers must still use the `try/catch` + `next(err)` pattern already documented in `code-standards.md`, since Express 4 does not auto-catch throws inside `async` functions.
+- **[04]** Added `User`, `StaffProfile`, `Address` to `prisma/schema.prisma`, matching `context/schema.prisma` field-for-field (relations to not-yet-existing models — `Cart`, `Wishlist`, `Order`, `Notification`, `RecentlyViewed`, `OrderStatusHistory`, `RefundRequest`, `Order.address` — intentionally omitted per spec, to be added incrementally by their owning specs). Ran `prisma migrate dev --name add_identity_models`; verified the generated SQL has the `user_id` FK on `addresses` with `ON DELETE CASCADE ON UPDATE CASCADE`, unique constraints on both `clerk_id`/`email` columns, and the `addresses.user_id` index — all matching spec 04's acceptance criteria. `prisma generate` had to be re-run manually after the migration for `tsc --noEmit` to pick up the new `User`/`StaffProfile`/`Address` client types (migrate dev's auto-generate step didn't refresh `src/generated/prisma` in this session). Tests added at `tests/db/identity-models.test.ts` (not under `tests/features/` since this spec is schema-only — no repository/service layer exists yet for these models) using `prisma.user.create`/`prisma.address.create` directly, covering: `User` defaults (`notificationsEnabled: true`, `deletedAt: null`), FK enforcement on `Address.userId` against a nonexistent user, and cascade delete of `Address` rows when the owning `User` is deleted.
 - **[tooling]** Added `@vitest/coverage-v8` (`code-standards.md` dependency list updated) and a `coverage` script (`vitest run --coverage`) at developer request. `vitest.config.ts` extends Vitest's default coverage excludes (rather than replacing them) with `src/generated/**`, so the generated Prisma client doesn't dilute the coverage numbers. Also drove full-suite coverage from ~86% up to **100% statements/branches/functions/lines**, adding targeted tests for previously-unexercised paths: `logger.ts` (never called directly before — `errorHandler.test.ts`'s spy replaced its real body), `app.ts`'s `resolveCorsOrigin` (both the permissive-dev and explicit-allow-list branches), and `db/prisma.ts`'s `NODE_ENV` branches (dev/test logging config, `globalThis` caching outside production). To close the last branch gap in `env.ts`'s `loadEnv()` — the `if (err instanceof EnvValidationError)` guard's non-`EnvValidationError` path, previously unreachable through the public API — `loadEnv` was exported with an optional injectable `parse` function (defaulting to `parseEnv`), extending the same pure/side-effecting split already established for `parseEnv` in the spec 01 decision above. This is a real behavioral seam (verifies `loadEnv` truly distinguishes expected validation failures from unexpected ones), not a coverage-only hack.
+
+---
+
+## Notes
+
+*(Scope-tempting ideas surfaced during review or implementation, parked here instead of built — pick up when the relevant spec comes around.)*
+
+- **[04, post-review]** `Address.isDefault` has no uniqueness enforcement — nothing currently stops two `Address` rows for the same `userId` from both having `isDefault: true`. `context/schema.prisma` doesn't declare this constraint either, and Prisma's schema DSL can't express a partial/conditional unique index declaratively (would require hand-written raw SQL in a migration, invisible to future `migrate dev` diffing). Decided with the developer to enforce this in the service layer instead: when the Address CRUD spec ("Addresses-in-checkout", per spec 04's Out of Scope) implements create/update, setting a new default must unset any existing default for that `userId` inside the same transaction.
+- **[04, post-review]** `User.clerkId`/`User.email` are globally unique (`@unique`) alongside a soft-delete marker (`deletedAt`) — once a `User` row is soft-deleted, its `clerkId`/`email` stay reserved forever, blocking reactivation or a new Clerk signup reusing that email. Same conflict exists in `context/schema.prisma` itself, so it's not a spec-04 deviation, and no spec yet writes to `deletedAt` (spec 04 is schema-only). There's no real "partial unique index" support in Prisma's schema DSL (no `partialIndexes` preview feature exists in any released Prisma version — `where` on `@@unique` is not valid syntax and would fail `prisma validate`). Decided with the developer to park this: whichever future spec first implements the user soft-delete/deactivation write path should mangle `clerkId`/`email` (e.g. prefix with `deleted:` + the row id) at delete time to free the original values, rather than relying on a DB-level partial index.
 
