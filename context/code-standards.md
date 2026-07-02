@@ -284,5 +284,6 @@ Approved dependencies:
 - `typescript-eslint`, `@eslint/js`, `eslint-config-prettier` — flat ESLint config + TS support, and disabling stylistic rules that conflict with Prettier (spec 01 §1)
 - `@prisma/adapter-pg`, `pg` (+ `@types/pg`) — Prisma v7 requires an explicit driver adapter for SQL providers; there is no built-in engine fallback anymore (spec 02 §4)
 - `@types/node`, `@types/express`, `@types/cors`, `@types/morgan`, `@types/supertest` — type definitions for the above
+- `@vitest/coverage-v8` — Vitest's official V8-based coverage provider, required for `vitest run --coverage` (not bundled with `vitest` itself); version pinned to match the installed `vitest` major (`^4.x`)
 
 Do not install anything else without updating this list first.

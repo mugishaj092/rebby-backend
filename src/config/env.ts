@@ -32,9 +32,9 @@ export function parseEnv(source: NodeJS.ProcessEnv): Env {
   return result.data;
 }
 
-function loadEnv(): Env {
+export function loadEnv(parse: (source: NodeJS.ProcessEnv) => Env = parseEnv): Env {
   try {
-    return parseEnv(process.env);
+    return parse(process.env);
   } catch (err) {
     if (err instanceof EnvValidationError) {
       console.error(err.message);
