@@ -7,8 +7,8 @@ Update this file after every completed task. Any AI agent reading this should im
 ## Current Status
 
 **Phase:** 1 — Foundation
-**Last completed:** 02 Prisma Setup & Base Schema
-**Next:** 03 Core Middleware & Error Handling
+**Last completed:** 03 Core Middleware & Error Handling
+**Next:** 04 Identity Models + Migration
 
 ---
 
@@ -17,7 +17,7 @@ Update this file after every completed task. Any AI agent reading this should im
 ### Phase 1 — Foundation
 - [x] 01 Project Skeleton
 - [x] 02 Prisma Setup & Base Schema
-- [ ] 03 Core Middleware & Error Handling
+- [x] 03 Core Middleware & Error Handling
 - [ ] 04 Identity Models + Migration
 - [ ] 05 Auth Integration (Clerk)
 
@@ -88,4 +88,8 @@ Update this file after every completed task. Any AI agent reading this should im
 - **[02]** `tests/setup.ts` now imports `dotenv/config` before applying env fallbacks (so a real `.env` `DATABASE_URL` is used in tests when present, dummy placeholder otherwise — needed for spec 02's connectivity-test requirement) and force-sets `NODE_ENV='test'` unconditionally instead of only defaulting it. `tests/config/env.test.ts` is unaffected (calls `parseEnv` directly with a mock object, not `process.env`). Added `tests/db/prisma.test.ts` running a real `SELECT 1` through the singleton.
 - **[02]** Added an explicit connectivity check + success log ("Database connection established successfully") in `src/server.ts` before `app.listen`, at the developer's request. Initially used `prisma.$connect()`, but that turned out to be a no-op with v7 driver adapters — the underlying `pg` pool connects lazily on the first real query, so `$connect()` resolved (and logged success) even against a nonexistent database/bad credentials, confirmed by testing with a deliberately invalid `DATABASE_URL`. Fixed by running an actual `prisma.$queryRaw\`SELECT 1\`` instead, which forces a real round-trip and correctly throws (causing `main().catch()` to log and `process.exit(1)`) on bad credentials — verified against both a bad and a working `DATABASE_URL`.
 - **[02]** `app.listen(...)` in `src/server.ts` is now wrapped in a `Promise` that resolves on the `listening` callback and rejects on the server's `'error'` event, so failures like `EADDRINUSE` flow into the same `main().catch()` path as the DB check instead of surfacing as an unhandled `'error'` event with a raw stack dump. Verified by starting two instances on the same port — the second now exits cleanly via `"Failed to start server: ..."` instead of crashing with an uncaught exception trace.
+- **[03]** `errorHandler`'s log context prefix uses `[<method> <path>]` (e.g. `[GET /orders/123]`) rather than the `code-standards.md` example's feature-scoped `[orders.service.createOrder]` format — the middleware is generic and has no feature/service context to draw on at that layer. Feature-level services should still log with the `[feature.service.function]` pattern from within their own `catch` blocks before rethrowing; the request-scoped prefix here is specific to the top-level handler.
+- **[03]** Added a `res.headersSent` guard at the top of `errorHandler` (defers to `next(err)` instead of writing a response) — not called out explicitly in spec 03, but standard Express guidance for error-handling middleware to avoid a hard crash (`ERR_HTTP_HEADERS_SENT`) if an error occurs after a response has already started streaming. Nothing streams yet, but this middleware is permanent infrastructure every future feature routes through. Added post-review, with a unit test (`tests/core/middleware/errorHandler.unit.test.ts`) covering the guard directly since it can't be exercised via a clean Supertest round trip.
+- **[03]** `validate(...)` throws `ValidationError` synchronously from inside the middleware function body (rather than calling `next(err)`), matching spec 03 §4's literal wording ("on failure, throws `ValidationError`"). This relies on Express 4's built-in behavior of catching synchronous throws in middleware/route handlers automatically — safe here since `validate` is fully synchronous. Future async controllers must still use the `try/catch` + `next(err)` pattern already documented in `code-standards.md`, since Express 4 does not auto-catch throws inside `async` functions.
+- **[tooling]** Added `@vitest/coverage-v8` (`code-standards.md` dependency list updated) and a `coverage` script (`vitest run --coverage`) at developer request. `vitest.config.ts` extends Vitest's default coverage excludes (rather than replacing them) with `src/generated/**`, so the generated Prisma client doesn't dilute the coverage numbers. Also drove full-suite coverage from ~86% up to **100% statements/branches/functions/lines**, adding targeted tests for previously-unexercised paths: `logger.ts` (never called directly before — `errorHandler.test.ts`'s spy replaced its real body), `app.ts`'s `resolveCorsOrigin` (both the permissive-dev and explicit-allow-list branches), and `db/prisma.ts`'s `NODE_ENV` branches (dev/test logging config, `globalThis` caching outside production). To close the last branch gap in `env.ts`'s `loadEnv()` — the `if (err instanceof EnvValidationError)` guard's non-`EnvValidationError` path, previously unreachable through the public API — `loadEnv` was exported with an optional injectable `parse` function (defaulting to `parseEnv`), extending the same pure/side-effecting split already established for `parseEnv` in the spec 01 decision above. This is a real behavioral seam (verifies `loadEnv` truly distinguishes expected validation failures from unexpected ones), not a coverage-only hack.
 
