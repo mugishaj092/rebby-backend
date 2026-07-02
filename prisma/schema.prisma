@@ -1,0 +1,56 @@
+// ============================================================
+//  REBY — Fashion E-Commerce Schema
+//  Prisma · PostgreSQL · single-store, customer + staff access levels
+// ============================================================
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ----- Enums --------------------------------------------------
+enum StaffRole {
+  staff
+  manager
+  owner
+
+  @@map("staff_role")
+}
+
+enum OrderStatus {
+  pending
+  confirmed
+  preparing
+  packed
+  shipped
+  out_for_delivery
+  delivered
+  cancelled
+  returned
+  refunded
+
+  @@map("order_status")
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  failed
+  refunded
+
+  @@map("payment_status")
+}
+
+enum PaymentProvider {
+  momo
+  airtel
+  cod
+  card
+
+  @@map("payment_provider")
+}

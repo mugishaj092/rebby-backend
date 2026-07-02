@@ -282,6 +282,7 @@ Approved dependencies:
 - `nodemon` — dev-mode file watcher/auto-restart for `npm run dev`, configured via `nodemon.json` to exec `tsx src/server.ts` on changes under `src/`
 - `tsc-alias` — rewrites `@/*` path aliases in compiled output; `tsc` alone does not do this (spec 01 §1)
 - `typescript-eslint`, `@eslint/js`, `eslint-config-prettier` — flat ESLint config + TS support, and disabling stylistic rules that conflict with Prettier (spec 01 §1)
+- `@prisma/adapter-pg`, `pg` (+ `@types/pg`) — Prisma v7 requires an explicit driver adapter for SQL providers; there is no built-in engine fallback anymore (spec 02 §4)
 - `@types/node`, `@types/express`, `@types/cors`, `@types/morgan`, `@types/supertest` — type definitions for the above
 
 Do not install anything else without updating this list first.

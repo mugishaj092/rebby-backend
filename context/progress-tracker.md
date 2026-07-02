@@ -7,8 +7,8 @@ Update this file after every completed task. Any AI agent reading this should im
 ## Current Status
 
 **Phase:** 1 — Foundation
-**Last completed:** 01 Project Skeleton
-**Next:** 02 Prisma Setup & Base Schema
+**Last completed:** 02 Prisma Setup & Base Schema
+**Next:** 03 Core Middleware & Error Handling
 
 ---
 
@@ -16,7 +16,7 @@ Update this file after every completed task. Any AI agent reading this should im
 
 ### Phase 1 — Foundation
 - [x] 01 Project Skeleton
-- [ ] 02 Prisma Setup & Base Schema
+- [x] 02 Prisma Setup & Base Schema
 - [ ] 03 Core Middleware & Error Handling
 - [ ] 04 Identity Models + Migration
 - [ ] 05 Auth Integration (Clerk)
@@ -82,4 +82,9 @@ Update this file after every completed task. Any AI agent reading this should im
 - **[01]** Post-review decision: `NODE_ENV`/`PORT` keep Zod `.default(...)` values (development / 4000) rather than being strictly required like the other 6 env vars — confirmed with the developer as the intended, pragmatic behavior. `tsconfig.json`'s extra `noUncheckedIndexedAccess: true` was reviewed and kept (harmless added strictness, no scope conflict).
 - **[01]** Post-spec: `npm run dev` switched from `tsx watch src/server.ts` to `nodemon` (config in `nodemon.json`, watching `src/**/*.ts`, execing `tsx src/server.ts` on change) — developer preference; `tsx` is still the actual TS runner (keeps `@/*` alias resolution working), nodemon only owns the watch/restart loop. Added `nodemon` to the approved-dependency list.
 - **[01]** `tsconfig.json`: dropped deprecated `baseUrl` (no longer required alongside `paths` since TS 4.1; `@/*` now maps to `./src/*` with an explicit leading `./`). Upgraded `typescript` devDependency from `^5.7.3` to `^6.0.3` (current stable — `7.0` is already in RC) since the IDE's language server was already on 6.x and disagreed with the older CLI on the valid `ignoreDeprecations` value; added `"ignoreDeprecations": "6.0"` to silence the `moduleResolution=node10` deprecation warning (still functions through TS 6.x, only removed in 7.0 — consistent with the earlier CommonJS/`node10` decision above). Verified `typescript-eslint@8.x` supports TS `<6.1.0`, so no eslint bump needed.
+- **[02]** `npm install prisma` resolved to **Prisma v7.8.0**, not the v6-era API spec 02's code snippets were written against. Followed `.claude/skills/prisma-upgrade-v7` to adapt: generator uses `provider = "prisma-client"` (not the legacy `prisma-client-js`) with a mandatory `output` path and `moduleFormat = "cjs"` (matching this repo's CommonJS decision from spec 01, not the skill's ESM-first default); `datasource db` no longer inlines `url` (deprecated in v7) — the URL now lives in a new root-level `prisma.config.ts`. SQL driver adapters are mandatory in v7, so `@prisma/adapter-pg` + `pg` (+ `@types/pg`) were added and wired into `src/db/prisma.ts`'s singleton; added to the approved-dependency list in `code-standards.md`. The four enums, their values, and `@@map` names match `context/schema.prisma` exactly — verified via `psql \dT+` after migration.
+- **[02]** Generated Prisma Client output set to `src/generated/prisma` (not the skill's default root-level `../generated/prisma`) because `tsconfig.build.json` restricts `rootDir` to `src`; the v7 `prisma-client` generator emits `.ts` source (not precompiled JS) that must be compiled by the build, so it has to live inside `rootDir`. Added `src/generated/` to `.gitignore`, `.prettierignore`, and eslint `ignores`.
+- **[02]** `docker-compose.yml` (Postgres 16, named volume `reby_postgres_data`) added per spec, and documented in new `docs/local-setup.md` — this is the reproducible path for a clean clone. This session's actual migration ran against the developer's existing local native PostgreSQL 18 install instead (already configured in `.env`, port 5432 already occupied by the native service), since spec 02 explicitly allows "or document the equivalent."
+- **[02]** `tests/setup.ts` now imports `dotenv/config` before applying env fallbacks (so a real `.env` `DATABASE_URL` is used in tests when present, dummy placeholder otherwise — needed for spec 02's connectivity-test requirement) and force-sets `NODE_ENV='test'` unconditionally instead of only defaulting it. `tests/config/env.test.ts` is unaffected (calls `parseEnv` directly with a mock object, not `process.env`). Added `tests/db/prisma.test.ts` running a real `SELECT 1` through the singleton.
+- **[02]** Added an explicit connectivity check + success log ("Database connection established successfully") in `src/server.ts` before `app.listen`, at the developer's request. Initially used `prisma.$connect()`, but that turned out to be a no-op with v7 driver adapters — the underlying `pg` pool connects lazily on the first real query, so `$connect()` resolved (and logged success) even against a nonexistent database/bad credentials, confirmed by testing with a deliberately invalid `DATABASE_URL`. Fixed by running an actual `prisma.$queryRaw\`SELECT 1\`` instead, which forces a real round-trip and correctly throws (causing `main().catch()` to log and `process.exit(1)`) on bad credentials — verified against both a bad and a working `DATABASE_URL`.
 
