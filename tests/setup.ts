@@ -1,4 +1,6 @@
-process.env.NODE_ENV = process.env.NODE_ENV ?? 'test';
+import 'dotenv/config';
+
+process.env.NODE_ENV = 'test';
 process.env.PORT = process.env.PORT ?? '4000';
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgresql://user:password@localhost:5432/reby_test';
