@@ -5,7 +5,7 @@
 | Identity table | `users` | `staff_profiles` |
 | Password hashing | argon2id | argon2id |
 | Access token | Signed JWT, 15 min TTL, `Authorization: Bearer` | Signed JWT, 15 min TTL, `Authorization: Bearer` |
-| Refresh token | Opaque, 30-day TTL, `reby_refresh_token` httpOnly cookie (path `/api/v1/auth`) | Opaque, 30-day TTL, `reby_staff_refresh_token` httpOnly cookie (path `/api/v1/admin/auth`) |
+| Refresh token | Opaque, 30-day TTL, `reby_refresh_token` httpOnly cookie **or** `refreshToken` in the body (cookie-less clients, e.g. React Native/Expo → `expo-secure-store`) | Opaque, 30-day TTL, `reby_staff_refresh_token` httpOnly cookie only (browser admin dashboard, no body fallback) |
 | Distinguishing claim | JWT `type: "customer"` | JWT `type: "staff"` (+ `role`) |
 | Middleware | `requireCustomer` | `requireStaff(minRole)` |
 | Scope | own data only, ownership-scoped | cross-customer, audited |

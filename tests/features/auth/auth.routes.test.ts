@@ -34,7 +34,7 @@ describe('features/auth routes', () => {
   }
 
   describe('POST /api/v1/auth/register', () => {
-    it('creates a customer account, returns 201 with no refreshToken in the body, and sets the cookie', async () => {
+    it('creates a customer account, returns 201 with the refreshToken in the body (for mobile/expo-secure-store clients), and also sets the cookie', async () => {
       const email = uniqueEmail();
 
       const response = await request(app)
@@ -44,7 +44,7 @@ describe('features/auth routes', () => {
       expect(response.status).toBe(201);
       expect(response.body.data.user.email).toBe(email);
       expect(typeof response.body.data.accessToken).toBe('string');
-      expect(response.body.data.refreshToken).toBeUndefined();
+      expect(typeof response.body.data.refreshToken).toBe('string');
       createdUserIds.push(response.body.data.user.id);
 
       const setCookie = response.headers['set-cookie'] as unknown as string[];
@@ -76,6 +76,35 @@ describe('features/auth routes', () => {
 
       expect(response.status).toBe(409);
     });
+
+    it('returns 409 for a duplicate email that only differs by casing/whitespace', async () => {
+      const email = uniqueEmail();
+      const first = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ name: 'Jane Doe', email, password: 'correct-horse-battery-staple' });
+      createdUserIds.push(first.body.data.user.id);
+
+      const response = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ name: 'Someone Else', email: `  ${email.toUpperCase()}  `, password: 'another-long-password' });
+
+      expect(response.status).toBe(409);
+    });
+
+    it('logs in successfully when the email casing differs from how it was registered', async () => {
+      const email = uniqueEmail();
+      const registered = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ name: 'Jane Doe', email, password: 'correct-horse-battery-staple' });
+      createdUserIds.push(registered.body.data.user.id);
+
+      const response = await request(app)
+        .post('/api/v1/auth/login')
+        .send({ email: email.toUpperCase(), password: 'correct-horse-battery-staple' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.data.user.email).toBe(email);
+    });
   });
 
   describe('customer login/refresh/logout flow', () => {
@@ -101,6 +130,33 @@ describe('features/auth routes', () => {
       expect(logoutRes.body.data.loggedOut).toBe(true);
 
       const refreshAfterLogout = await agent.post('/api/v1/auth/refresh');
+      expect(refreshAfterLogout.status).toBe(401);
+    });
+
+    it('supports a cookie-less client (e.g. React Native/Expo) via refreshToken in the request body', async () => {
+      const email = uniqueEmail();
+      const registered = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ name: 'Jane Doe', email, password: 'correct-horse-battery-staple' });
+      createdUserIds.push(registered.body.data.user.id);
+      const initialRefreshToken = registered.body.data.refreshToken as string;
+
+      // No cookie jar (plain `request(app)`, not `.agent(app)`) — only the body carries the token.
+      const refreshRes = await request(app)
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken: initialRefreshToken });
+      expect(refreshRes.status).toBe(200);
+      expect(typeof refreshRes.body.data.refreshToken).toBe('string');
+      const rotatedRefreshToken = refreshRes.body.data.refreshToken as string;
+
+      const logoutRes = await request(app)
+        .post('/api/v1/auth/logout')
+        .send({ refreshToken: rotatedRefreshToken });
+      expect(logoutRes.status).toBe(200);
+
+      const refreshAfterLogout = await request(app)
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken: rotatedRefreshToken });
       expect(refreshAfterLogout.status).toBe(401);
     });
 
@@ -178,9 +234,13 @@ describe('features/auth routes', () => {
         .send({ email: staff.email, password: 'staff-password-123456' });
       expect(loginRes.status).toBe(200);
       expect(loginRes.body.data.staff.role).toBe(StaffRole.owner);
+      // Unlike the customer flow, staff is a browser client (the admin dashboard) — the refresh
+      // token stays cookie-only and is never present in the JSON body.
+      expect(loginRes.body.data.refreshToken).toBeUndefined();
 
       const refreshRes = await agent.post('/api/v1/admin/auth/refresh');
       expect(refreshRes.status).toBe(200);
+      expect(refreshRes.body.data.refreshToken).toBeUndefined();
 
       const logoutRes = await agent.post('/api/v1/admin/auth/logout');
       expect(logoutRes.status).toBe(200);

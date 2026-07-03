@@ -23,23 +23,53 @@ const errorEnvelope = (code: string, example: string): object => ({
   },
 });
 
-const tokenResponseSchema = (accountKey: 'user' | 'staff', extraAccountProps: object = {}): object =>
+const tokenResponseSchema = (
+  accountKey: 'user' | 'staff',
+  options: { extraAccountProps?: object; includeRefreshToken?: boolean } = {},
+): object =>
   successEnvelope({
     type: 'object',
     properties: {
       accessToken: { type: 'string', description: 'Short-lived JWT — send as `Authorization: Bearer <token>`' },
       expiresIn: { type: 'integer', description: 'Access token TTL in seconds' },
+      ...(options.includeRefreshToken
+        ? {
+            refreshToken: {
+              type: 'string',
+              description:
+                'Only present for the customer flow (mobile/expo-secure-store clients). Also set as an httpOnly cookie for browser clients — store this value yourself only if you cannot rely on cookies.',
+            },
+          }
+        : {}),
       [accountKey]: {
         type: 'object',
         properties: {
           id: { type: 'string', format: 'uuid' },
           name: { type: 'string' },
           email: { type: 'string', format: 'email' },
-          ...extraAccountProps,
+          ...options.extraAccountProps,
         },
       },
     },
   });
+
+const refreshOrLogoutRequestBody = {
+  required: false,
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        properties: {
+          refreshToken: {
+            type: 'string',
+            description:
+              'Optional — only needed by cookie-less clients (React Native/Expo). Browser clients omit this; the httpOnly cookie is used instead.',
+          },
+        },
+      },
+    },
+  },
+};
 
 const invalidCredentialsResponse = {
   description: 'Wrong email/password, unknown email, or a locked account — content-identical for all three',
@@ -73,7 +103,7 @@ export const openApiDocument: JsonObject = {
     title: 'REBY API (dev — auth foundation only)',
     version: '0.1.0-dev',
     description:
-      'Hand-written, throwaway OpenAPI doc covering spec 05 only (health check, self-hosted JWT auth, and the temporary /_debug/* routes). Superseded by the real generated spec in spec 35; not for production use. Refresh/logout rely on an httpOnly cookie set by a prior login/register call in the same browser session — use "Try it out" for login first, then refresh/logout, so the cookie is present.',
+      'Hand-written, throwaway OpenAPI doc covering spec 05 only (health check, self-hosted JWT auth, and the temporary /_debug/* routes). Superseded by the real generated spec in spec 35; not for production use. Customer refresh/logout accept the refresh token via cookie (browser) or request body (React Native/Expo — no persistent cookie jar); staff refresh/logout are cookie-only. Use "Try it out" for login first (in the same browser session) so the cookie is present, or pass refreshToken from the login/register response body directly.',
   },
   paths: {
     '/health': {
@@ -98,7 +128,8 @@ export const openApiDocument: JsonObject = {
     '/api/v1/auth/register': {
       post: {
         summary: 'Register a new customer account',
-        description: 'Sets the reby_refresh_token httpOnly cookie (path-scoped to /api/v1/auth).',
+        description:
+          'Sets the reby_refresh_token httpOnly cookie (path-scoped to /api/v1/auth) AND returns refreshToken in the body, for cookie-less (React Native/Expo) clients.',
         tags: ['Auth — Customer'],
         requestBody: {
           required: true,
@@ -118,7 +149,10 @@ export const openApiDocument: JsonObject = {
           },
         },
         responses: {
-          '201': { description: 'Account created', content: { 'application/json': { schema: tokenResponseSchema('user') } } },
+          '201': {
+            description: 'Account created',
+            content: { 'application/json': { schema: tokenResponseSchema('user', { includeRefreshToken: true }) } },
+          },
           '409': {
             description: 'Email already registered',
             content: {
@@ -143,11 +177,15 @@ export const openApiDocument: JsonObject = {
     '/api/v1/auth/login': {
       post: {
         summary: 'Log in as a customer',
-        description: 'Sets the reby_refresh_token httpOnly cookie (path-scoped to /api/v1/auth).',
+        description:
+          'Sets the reby_refresh_token httpOnly cookie (path-scoped to /api/v1/auth) AND returns refreshToken in the body, for cookie-less (React Native/Expo) clients.',
         tags: ['Auth — Customer'],
         requestBody: credentialsRequestBody,
         responses: {
-          '200': { description: 'Logged in', content: { 'application/json': { schema: tokenResponseSchema('user') } } },
+          '200': {
+            description: 'Logged in',
+            content: { 'application/json': { schema: tokenResponseSchema('user', { includeRefreshToken: true }) } },
+          },
           '401': invalidCredentialsResponse,
           '429': {
             description: 'Rate limited (10 requests/minute per IP)',
@@ -162,8 +200,9 @@ export const openApiDocument: JsonObject = {
       post: {
         summary: 'Rotate the customer refresh token and issue a new access token',
         description:
-          'Reads reby_refresh_token from the cookie (no request body). Replaying an already-rotated token revokes the entire token family, forcing full re-login.',
+          'Reads reby_refresh_token from the cookie, or refreshToken from the request body for cookie-less (React Native/Expo) clients (cookie takes precedence if both are present). Replaying an already-rotated token revokes the entire token family, forcing full re-login.',
         tags: ['Auth — Customer'],
+        requestBody: refreshOrLogoutRequestBody,
         responses: {
           '200': {
             description: 'Rotated',
@@ -173,6 +212,7 @@ export const openApiDocument: JsonObject = {
                   type: 'object',
                   properties: {
                     accessToken: { type: 'string' },
+                    refreshToken: { type: 'string' },
                     expiresIn: { type: 'integer' },
                   },
                 }),
@@ -186,10 +226,12 @@ export const openApiDocument: JsonObject = {
     '/api/v1/auth/logout': {
       post: {
         summary: 'Revoke the presented customer refresh token and clear the cookie',
+        description: 'Reads reby_refresh_token from the cookie, or refreshToken from the request body for cookie-less clients.',
         tags: ['Auth — Customer'],
+        requestBody: refreshOrLogoutRequestBody,
         responses: {
           '200': {
-            description: 'Logged out (idempotent — succeeds even with no/invalid cookie present)',
+            description: 'Logged out (idempotent — succeeds even with no/invalid cookie or token present)',
             content: {
               'application/json': {
                 schema: successEnvelope({
@@ -213,7 +255,9 @@ export const openApiDocument: JsonObject = {
             description: 'Logged in',
             content: {
               'application/json': {
-                schema: tokenResponseSchema('staff', { role: { type: 'string', enum: ['staff', 'manager', 'owner'] } }),
+                schema: tokenResponseSchema('staff', {
+                  extraAccountProps: { role: { type: 'string', enum: ['staff', 'manager', 'owner'] } },
+                }),
               },
             },
           },

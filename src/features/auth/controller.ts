@@ -25,11 +25,22 @@ function readCookie(req: Request, name: string): string | undefined {
   return cookies?.[name];
 }
 
+// Native/mobile clients (React Native + Expo) can't rely on a browser-style persistent cookie
+// jar, so the customer flow also accepts the refresh token via the request body — stored
+// client-side in expo-secure-store rather than a cookie. The staff/admin flow is a real browser
+// client (the admin dashboard), so it stays cookie-only; see progress-tracker.md for the
+// rationale.
+function readBodyToken(req: Request): string | undefined {
+  const body = req.body as Record<string, unknown> | undefined;
+  const token = body?.refreshToken;
+  return typeof token === 'string' ? token : undefined;
+}
+
 export async function register(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { refreshToken, account, ...rest } = await authService.registerCustomer(req.body, requestContext(req));
-    setCustomerRefreshCookie(res, refreshToken);
-    res.status(201).json({ success: true, data: { ...rest, user: account } });
+    const { account, ...tokens } = await authService.registerCustomer(req.body, requestContext(req));
+    setCustomerRefreshCookie(res, tokens.refreshToken);
+    res.status(201).json({ success: true, data: { ...tokens, user: account } });
   } catch (err) {
     next(err);
   }
@@ -37,9 +48,9 @@ export async function register(req: Request, res: Response, next: NextFunction):
 
 export async function login(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { refreshToken, account, ...rest } = await authService.loginCustomer(req.body, requestContext(req));
-    setCustomerRefreshCookie(res, refreshToken);
-    res.status(200).json({ success: true, data: { ...rest, user: account } });
+    const { account, ...tokens } = await authService.loginCustomer(req.body, requestContext(req));
+    setCustomerRefreshCookie(res, tokens.refreshToken);
+    res.status(200).json({ success: true, data: { ...tokens, user: account } });
   } catch (err) {
     next(err);
   }
@@ -47,13 +58,13 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
 
 export async function refresh(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const rawToken = readCookie(req, CUSTOMER_REFRESH_COOKIE);
+    const rawToken = readCookie(req, CUSTOMER_REFRESH_COOKIE) ?? readBodyToken(req);
     if (!rawToken) {
       throw new UnauthorizedError('Missing refresh token');
     }
-    const { refreshToken, ...rest } = await authService.refreshCustomerSession(rawToken, requestContext(req));
-    setCustomerRefreshCookie(res, refreshToken);
-    res.status(200).json({ success: true, data: rest });
+    const tokens = await authService.refreshCustomerSession(rawToken, requestContext(req));
+    setCustomerRefreshCookie(res, tokens.refreshToken);
+    res.status(200).json({ success: true, data: tokens });
   } catch (err) {
     next(err);
   }
@@ -61,7 +72,7 @@ export async function refresh(req: Request, res: Response, next: NextFunction): 
 
 export async function logout(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const rawToken = readCookie(req, CUSTOMER_REFRESH_COOKIE);
+    const rawToken = readCookie(req, CUSTOMER_REFRESH_COOKIE) ?? readBodyToken(req);
     if (rawToken) {
       await authService.logoutCustomer(rawToken);
     }

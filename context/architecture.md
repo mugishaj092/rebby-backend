@@ -225,7 +225,7 @@ There is no multi-tenancy in REBY, but there **is** a hard boundary between cust
 | Identity table | `users` | `staff_profiles` |
 | Password hashing | argon2id (`core/security/password.ts`) | argon2id |
 | Access token | Signed JWT, 15 min TTL, `Authorization: Bearer` | Signed JWT, 15 min TTL, `Authorization: Bearer` |
-| Refresh token | Opaque, 30-day TTL, `reby_refresh_token` httpOnly cookie, path `/api/v1/auth` | Opaque, 30-day TTL, `reby_staff_refresh_token` httpOnly cookie, path `/api/v1/admin/auth` |
+| Refresh token | Opaque, 30-day TTL, `reby_refresh_token` httpOnly cookie (path `/api/v1/auth`) **or** `refreshToken` in the JSON body — cookie-less clients (React Native/Expo, no persistent cookie jar) use the body and store it in `expo-secure-store` | Opaque, 30-day TTL, `reby_staff_refresh_token` httpOnly cookie only, path `/api/v1/admin/auth` — a real browser client (admin dashboard), so no body fallback |
 | Distinguishing claim | JWT `type: "customer"` | JWT `type: "staff"` (+ `role`) |
 | Middleware | `requireCustomer` | `requireStaff(minRole)` |
 | Scope | Own data only | Cross-customer, audited |
