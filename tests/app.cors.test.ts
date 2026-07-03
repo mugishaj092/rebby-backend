@@ -15,6 +15,10 @@ describe('createApp CORS origin resolution', () => {
     vi.resetModules();
   });
 
+  // vi.resetModules() forces the entire @/app import chain to re-evaluate, including
+  // @/features/auth's transitive import of the native argon2 addon — that reinit is slow and
+  // can occasionally exceed the default 5s timeout under load. Same fix already applied to the
+  // equivalent case in tests/features/auth/routes.branches.test.ts.
   it('reflects the request origin back when CORS_ORIGIN is unset in development', async () => {
     process.env.NODE_ENV = 'development';
     delete process.env.CORS_ORIGIN;
@@ -26,7 +30,7 @@ describe('createApp CORS origin resolution', () => {
     const res = await request(app).get('/health').set('Origin', 'https://anything.example.com');
 
     expect(res.headers['access-control-allow-origin']).toBe('https://anything.example.com');
-  });
+  }, 15000);
 
   it('only allows origins present in an explicit, comma-separated CORS_ORIGIN list', async () => {
     process.env.NODE_ENV = 'test';
@@ -43,5 +47,5 @@ describe('createApp CORS origin resolution', () => {
 
     const blocked = await request(app).get('/health').set('Origin', 'https://evil.example.com');
     expect(blocked.headers['access-control-allow-origin']).toBeUndefined();
-  });
+  }, 15000);
 });
