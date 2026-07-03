@@ -8,7 +8,19 @@ import { signAccessToken } from '@/core/security/jwt';
 import { prisma } from '@/db/prisma';
 import { catalogRepository } from '@/features/catalog/repository';
 import * as catalogService from '@/features/catalog/service';
+import { Prisma } from '@/generated/prisma/client';
 import { StaffRole } from '@/generated/prisma/enums';
+
+function uniqueSlugConflictError(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'Unique constraint failed on the fields: (`slug`)',
+    {
+      code: 'P2002',
+      clientVersion: '7.8.0',
+      meta: { target: ['slug'] },
+    },
+  );
+}
 
 function uniqueName(prefix = 'Category'): string {
   return `${prefix} ${randomUUID()}`;
@@ -283,7 +295,21 @@ describe('features/catalog routes', () => {
   });
 
   describe('query filters', () => {
-    it('accepts an explicit activeOnly=true filter', async () => {
+    it('excludes inactive categories by default, with no activeOnly param at all', async () => {
+      const hidden = await createCategoryViaApi({ name: uniqueName('HiddenByDefault') });
+      await prisma.category.update({
+        where: { id: hidden.body.data.id },
+        data: { isActive: false },
+      });
+
+      const response = await request(app).get('/api/v1/categories');
+      const ids = response.body.data.map((c: { id: string }) => c.id);
+
+      expect(response.status).toBe(200);
+      expect(ids).not.toContain(hidden.body.data.id);
+    });
+
+    it('activeOnly=true filters to active categories only', async () => {
       const response = await request(app).get('/api/v1/categories?activeOnly=true');
       expect(response.status).toBe(200);
       expect(response.body.data.every((c: { isActive: boolean }) => c.isActive === true)).toBe(
@@ -291,10 +317,47 @@ describe('features/catalog routes', () => {
       );
     });
 
-    it('accepts an explicit activeOnly=false filter', async () => {
+    it('activeOnly=false lifts the restriction entirely, rather than showing only inactive ones', async () => {
+      const hidden = await createCategoryViaApi({ name: uniqueName('VisibleWhenUnrestricted') });
+      await prisma.category.update({
+        where: { id: hidden.body.data.id },
+        data: { isActive: false },
+      });
+
       const response = await request(app).get('/api/v1/categories?activeOnly=false');
+      const ids = response.body.data.map((c: { id: string }) => c.id);
+
       expect(response.status).toBe(200);
-      expect(Array.isArray(response.body.data)).toBe(true);
+      expect(ids).toContain(hidden.body.data.id);
+      expect(response.body.data.some((c: { isActive: boolean }) => c.isActive === true)).toBe(true);
+    });
+  });
+
+  describe('tree visibility of inactive categories', () => {
+    it('excludes an inactive category from GET /api/v1/categories/tree by default', async () => {
+      const hidden = await createCategoryViaApi({ name: uniqueName('HiddenTreeParent') });
+      await prisma.category.update({
+        where: { id: hidden.body.data.id },
+        data: { isActive: false },
+      });
+
+      const response = await request(app).get('/api/v1/categories/tree');
+      const ids = response.body.data.map((node: { id: string }) => node.id);
+
+      expect(ids).not.toContain(hidden.body.data.id);
+    });
+
+    it('service.getCategoryTree(false) still returns inactive categories for internal/admin callers', async () => {
+      const hidden = await createCategoryViaApi({ name: uniqueName('AdminTreeParent') });
+      await prisma.category.update({
+        where: { id: hidden.body.data.id },
+        data: { isActive: false },
+      });
+
+      const tree = await catalogService.getCategoryTree(false);
+      const ids = tree.map((node) => node.id);
+
+      expect(ids).toContain(hidden.body.data.id);
     });
   });
 
@@ -310,6 +373,53 @@ describe('features/catalog routes', () => {
         .send({ name: uniqueName('AlwaysCollides') });
 
       expect(response.status).toBe(409);
+      spy.mockRestore();
+    });
+  });
+
+  describe('slug uniqueness race guard (TOCTOU between pre-check and write)', () => {
+    it('maps a concurrent unique-constraint violation on create to a clean 409, not a raw error', async () => {
+      const spy = vi
+        .spyOn(catalogRepository, 'createCategory')
+        .mockRejectedValueOnce(uniqueSlugConflictError());
+
+      const response = await request(app)
+        .post('/api/v1/admin/categories')
+        .set('Authorization', `Bearer ${staffToken()}`)
+        .send({ name: uniqueName('RaceCreate') });
+
+      expect(response.status).toBe(409);
+      expect(response.body.error.code).toBe('CONFLICT');
+      spy.mockRestore();
+    });
+
+    it('maps a concurrent unique-constraint violation on update to a clean 409, not a raw error', async () => {
+      const created = await createCategoryViaApi();
+      const spy = vi
+        .spyOn(catalogRepository, 'updateCategory')
+        .mockRejectedValueOnce(uniqueSlugConflictError());
+
+      const response = await request(app)
+        .patch(`/api/v1/admin/categories/${created.body.data.id}`)
+        .set('Authorization', `Bearer ${staffToken()}`)
+        .send({ slug: `race-update-${randomUUID()}` });
+
+      expect(response.status).toBe(409);
+      expect(response.body.error.code).toBe('CONFLICT');
+      spy.mockRestore();
+    });
+
+    it('rethrows a non-P2002 error from the write instead of swallowing it', async () => {
+      const spy = vi
+        .spyOn(catalogRepository, 'createCategory')
+        .mockRejectedValueOnce(new Error('unexpected db failure'));
+
+      const response = await request(app)
+        .post('/api/v1/admin/categories')
+        .set('Authorization', `Bearer ${staffToken()}`)
+        .send({ name: uniqueName('RaceOtherError') });
+
+      expect(response.status).toBe(500);
       spy.mockRestore();
     });
   });

@@ -50,13 +50,16 @@ export const catalogRepository = {
     return prisma.category.findMany({
       where: {
         ...(parentId !== undefined ? { parentId } : {}),
-        ...(activeOnly !== undefined ? { isActive: activeOnly } : {}),
+        ...(activeOnly ? { isActive: true } : {}),
       },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
   },
 
-  listAllCategories() {
-    return prisma.category.findMany({ orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] });
+  listAllCategories(activeOnly?: boolean) {
+    return prisma.category.findMany({
+      where: activeOnly ? { isActive: true } : undefined,
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    });
   },
 };

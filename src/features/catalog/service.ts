@@ -1,5 +1,6 @@
 import { ConflictError, NotFoundError } from '@/core/errors/AppError';
 import { slugify } from '@/core/utils/slugify';
+import { Prisma } from '@/generated/prisma/client';
 import type { Category } from '@/generated/prisma/client';
 
 import { catalogRepository } from './repository';
@@ -31,6 +32,21 @@ async function assertSlugAvailable(slug: string): Promise<void> {
   const existing = await catalogRepository.findCategoryBySlug(slug);
   if (existing) {
     throw new ConflictError('A category with this slug already exists');
+  }
+}
+
+// The pre-check in assertSlugAvailable/generateUniqueSlug is check-then-act, not atomic — two
+// concurrent requests can both pass it for the same slug. This catches the DB's unique
+// constraint violation that results from losing that race, so it still surfaces as a clean
+// ConflictError instead of an unhandled Prisma error.
+async function runWithSlugConflictGuard<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw new ConflictError('A category with this slug already exists');
+    }
+    throw err;
   }
 }
 
@@ -74,13 +90,15 @@ export async function createCategory(
     await assertSlugAvailable(input.slug);
   }
 
-  return catalogRepository.createCategory({
-    name: input.name,
-    slug,
-    parentId: input.parentId ?? null,
-    imageUrl: input.imageUrl ?? null,
-    sortOrder: input.sortOrder,
-  });
+  return runWithSlugConflictGuard(() =>
+    catalogRepository.createCategory({
+      name: input.name,
+      slug,
+      parentId: input.parentId ?? null,
+      imageUrl: input.imageUrl ?? null,
+      sortOrder: input.sortOrder,
+    }),
+  );
 }
 
 export async function updateCategory(
@@ -102,13 +120,15 @@ export async function updateCategory(
     await assertSlugAvailable(input.slug);
   }
 
-  return catalogRepository.updateCategory(id, {
-    ...(input.name !== undefined ? { name: input.name } : {}),
-    ...(input.slug !== undefined ? { slug: input.slug } : {}),
-    ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
-    ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
-    ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
-  });
+  return runWithSlugConflictGuard(() =>
+    catalogRepository.updateCategory(id, {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.slug !== undefined ? { slug: input.slug } : {}),
+      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+      ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
+      ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+    }),
+  );
 }
 
 export async function deleteCategory(_staffId: string, id: string): Promise<void> {
@@ -138,12 +158,12 @@ export async function getCategory(id: string): Promise<Category> {
 export function listCategories(query: ListCategoriesQuery): Promise<Category[]> {
   return catalogRepository.listCategories({
     parentId: query.parentId ?? null,
-    activeOnly: query.activeOnly,
+    activeOnly: query.activeOnly ?? true,
   });
 }
 
-export async function getCategoryTree(): Promise<CategoryTreeNode[]> {
-  const categories = await catalogRepository.listAllCategories();
+export async function getCategoryTree(activeOnly = true): Promise<CategoryTreeNode[]> {
+  const categories = await catalogRepository.listAllCategories(activeOnly);
 
   const nodesById = new Map<string, CategoryTreeNode>(
     categories.map((category) => [category.id, { ...category, children: [] }]),
