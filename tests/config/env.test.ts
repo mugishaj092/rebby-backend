@@ -6,7 +6,7 @@ const validEnv = {
   NODE_ENV: 'test',
   PORT: '4000',
   DATABASE_URL: 'postgresql://user:password@localhost:5432/reby_test',
-  CLERK_SECRET_KEY: 'test_clerk_secret_key',
+  JWT_ACCESS_SECRET: 'test_jwt_access_secret_at_least_32_characters_long',
   REDIS_URL: 'redis://localhost:6379',
   CLOUDINARY_URL: 'cloudinary://api_key:api_secret@cloud_name',
   FCM_SERVER_KEY: 'test_fcm_server_key',

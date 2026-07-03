@@ -230,7 +230,9 @@ All config via `.env`, read through a single typed loader in `config/env.ts` (Zo
 | Variable | Used in |
 |---|---|
 | `DATABASE_URL` | `prisma/schema.prisma`, Prisma Client |
-| `CLERK_SECRET_KEY` | `core/middleware/requireCustomer.ts`, `requireStaff.ts` |
+| `JWT_ACCESS_SECRET` | `core/security/jwt.ts` (sign/verify access tokens), used by `core/middleware/requireCustomer.ts`/`requireStaff.ts` |
+| `ACCESS_TOKEN_TTL_MINUTES` | `core/security/jwt.ts` |
+| `REFRESH_TOKEN_TTL_DAYS` | `features/auth/service.ts`, `features/auth/cookies.ts` |
 | `REDIS_URL` | `config/redis.ts`, BullMQ queues |
 | `CLOUDINARY_URL` | `config/cloudinary.ts` |
 | `FCM_SERVER_KEY` | `config/fcm.ts` |
@@ -270,7 +272,7 @@ Approved dependencies:
 
 - `express`, `@prisma/client`, `prisma`
 - `zod`
-- `@clerk/express` (or current Clerk Node SDK)
+- `argon2`, `jsonwebtoken` — password hashing (argon2id) and access-token JWTs (customer + staff auth)
 - `ioredis`, `bullmq`
 - `cloudinary`
 - `firebase-admin`
@@ -285,5 +287,11 @@ Approved dependencies:
 - `@prisma/adapter-pg`, `pg` (+ `@types/pg`) — Prisma v7 requires an explicit driver adapter for SQL providers; there is no built-in engine fallback anymore (spec 02 §4)
 - `@types/node`, `@types/express`, `@types/cors`, `@types/morgan`, `@types/supertest` — type definitions for the above
 - `@vitest/coverage-v8` — Vitest's official V8-based coverage provider, required for `vitest run --coverage` (not bundled with `vitest` itself); version pinned to match the installed `vitest` major (`^4.x`)
+- `swagger-ui-express` (+ `@types/swagger-ui-express`) — serves a hand-written, dev-only OpenAPI doc (`src/docs/openapi.ts`) at `/api-docs` for manually exercising the current auth routes ahead of spec 35's real generated spec
+- `argon2` — argon2id password hashing (`core/security/password.ts`) per spec 05's superseding revision; replaced `bcryptjs` (spec doesn't allow bcrypt — "OWASP's current recommended default"). Uses the package's own built-in defaults (memoryCost/timeCost/parallelism) rather than hardcoded values, so bumping the dependency is how they get revisited as hardware improves
+- `jsonwebtoken` (+ `@types/jsonwebtoken`) — signs/verifies short-lived access tokens (`{ sub, type, email, role? }`) statelessly for both `requireCustomer` and `requireStaff`; `ACCESS_TOKEN_TTL_MINUTES`/`REFRESH_TOKEN_TTL_DAYS` are plain numbers (minutes/days) rather than `"15m"`-style strings so they satisfy `SignOptions.expiresIn`'s `number` overload directly, with no unchecked cast to the `ms`-based string-literal type
+- `express-rate-limit` — IP-based rate limiting (`core/middleware/rateLimit.ts`) on `/register`, `/login`, `/admin/auth/login`; skipped in the test env since it's a module-level singleton whose counter would otherwise leak across unrelated tests (see the dedicated rate-limit test's `vi.resetModules()` pattern)
+- `helmet` — standard security headers, mounted first in `app.ts`
+- `cookie-parser` (+ `@types/cookie-parser`) — parses the httpOnly refresh-token cookies (`reby_refresh_token` / `reby_staff_refresh_token`) read by `features/auth/controller.ts`
 
 Do not install anything else without updating this list first.

@@ -20,7 +20,7 @@ Applied consistently by the shared error-handling middleware (`core/middleware/e
 | `ValidationError` | 422 | Zod schema failure, surfaced with field-level detail |
 | `InsufficientStockError` | 409 | `commitOrderStock` can't satisfy a line item |
 | `ForbiddenError` | 403 | wrong access level for the route (e.g. customer session on a staff route) |
-| `UnauthorizedError` | 401 | missing/invalid Clerk session |
+| `UnauthorizedError` | 401 | missing/invalid/expired session token |
 | `ConflictError` | 409 | invalid order status transition, duplicate coupon code, etc. |
 
 ## Rules

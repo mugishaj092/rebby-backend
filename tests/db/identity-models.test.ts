@@ -13,11 +13,10 @@ describe('identity models', () => {
   });
 
   it('creates a user and applies schema defaults', async () => {
-    const clerkId = `clerk_${randomUUID()}`;
     const email = `${randomUUID()}@example.com`;
 
     const created = await prisma.user.create({
-      data: { clerkId, name: 'Jane Doe', email },
+      data: { name: 'Jane Doe', email, passwordHash: 'hashed' },
     });
     createdUserIds.push(created.id);
 
@@ -42,11 +41,10 @@ describe('identity models', () => {
   });
 
   it('cascades address deletion when the owning user is deleted', async () => {
-    const clerkId = `clerk_${randomUUID()}`;
     const email = `${randomUUID()}@example.com`;
 
     const user = await prisma.user.create({
-      data: { clerkId, name: 'Cascade Test', email },
+      data: { name: 'Cascade Test', email, passwordHash: 'hashed' },
     });
 
     const address = await prisma.address.create({

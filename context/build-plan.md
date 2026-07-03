@@ -24,9 +24,10 @@ Set up the Express app: `app.ts` (app factory, middleware registration), `server
 `User`, `StaffProfile`, `Address` models in `schema.prisma`. Generate + run the migration.
 **Verify:** tables exist in Postgres with correct columns, FKs, and indexes.
 
-### 05 Auth Integration (Clerk)
-`features/auth/` — Clerk webhook handler (user created/updated → sync `User` row), `core/middleware/requireCustomer.ts`, `core/middleware/requireStaff.ts`.
-**Verify:** a valid customer Clerk session reaches a protected route and `req.user` is populated; an invalid/missing session is rejected with 401; a customer session is rejected on a staff-only route with 403.
+### 05 Auth (Self-Hosted JWT)
+`features/auth/` — customer `POST /api/v1/auth/{register,login,refresh,logout}`, staff `POST /api/v1/admin/auth/{login,refresh,logout}` (argon2id password hashing, short-lived access-token JWTs + long-lived rotating/revocable opaque refresh tokens in an httpOnly cookie, account lockout, IP rate limiting), `core/security/{password,jwt}.ts`, `core/middleware/{requireCustomer,requireStaff,rateLimit}.ts`.
+**Verify:** a valid customer access token reaches a protected route and `req.user` is populated; an invalid/missing/expired token is rejected with 401; a customer token is rejected on a staff-only route with 403; refresh rotates the token and replaying an already-rotated refresh token revokes the whole token family; 5 failed logins locks the account for 15 minutes.
+**Revision history:** originally built against Clerk (webhook-synced `User`/`StaffProfile` rows); replaced with self-hosted bcrypt + JWT auth per developer instruction; superseded again by this argon2id + access/refresh-token spec (`context/specs/05-auth-jwt.md`). See `progress-tracker.md`'s Decisions log for the full rationale of each revision.
 
 ---
 

@@ -96,7 +96,7 @@ routes.ts  →  controller.ts  →  service.ts  →  repository.ts  →  Prisma 
 
 ## 5. Stack
 
-Express.js · TypeScript (strict) · Prisma · PostgreSQL · Zod · Clerk (customer + staff auth) · Redis · BullMQ · Cloudinary · Firebase Cloud Messaging.
+Express.js · TypeScript (strict) · Prisma · PostgreSQL · Zod · argon2id + JWT access/refresh tokens (customer + staff auth) · Redis · BullMQ · Cloudinary · Firebase Cloud Messaging.
 Approved dependencies are listed in `code-standards.md`. **Do not add a package without updating that list and explaining why.**
 
 ---
@@ -166,4 +166,4 @@ Also check `.claude/skills/` for a skill relevant to the specific library or tas
 - **Schema ambiguity?** Match `schema.prisma`. Don't guess fields.
 - **A rule seems to block the task?** Stop and surface the conflict — do not silently work around a Golden Rule.
 - **Tempted to add scope?** Don't. Note the idea in `progress-tracker.md` under Notes and move on.
-- **Library API differs from what you remember?** Read the official docs (Express / Prisma / Zod / Clerk) before implementing — these APIs have changed and your memory may be stale.
+- **Library API differs from what you remember?** Read the official docs (Express / Prisma / Zod / jsonwebtoken / argon2) before implementing — these APIs have changed and your memory may be stale.

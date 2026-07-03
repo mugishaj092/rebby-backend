@@ -14,7 +14,7 @@ The technical design of the platform. Read this before writing any code. Every d
 | ORM | Prisma |
 | Database | PostgreSQL 16+ |
 | Validation | Zod |
-| Auth | Clerk (customer + staff sessions, distinguished by role) |
+| Auth | Custom email + password (argon2id-hashed), short-lived signed access-token JWTs + long-lived opaque, rotating, revocable refresh tokens (httpOnly cookie), distinguished by role |
 | Caching | Redis |
 | Background jobs | BullMQ |
 | Image storage | Cloudinary |
@@ -43,11 +43,15 @@ src/
 
   core/                    # cross-cutting code shared by ALL features (not a feature itself)
     middleware/
-      requireCustomer.ts   # verifies Clerk session → attaches req.user
-      requireStaff.ts      # verifies Clerk session + role → attaches req.staff
+      requireCustomer.ts   # verifies access-token JWT statelessly (no DB hit) → attaches req.user
+      requireStaff.ts      # verifies access-token JWT + role, statelessly → attaches req.staff
       errorHandler.ts      # converts typed errors to the response envelope
       responseEnvelope.ts
-      rateLimit.ts
+      rateLimit.ts         # IP-based limiter on register/login/staff-login
+      extractBearerToken.ts
+    security/
+      password.ts          # hashPassword/verifyPassword (argon2id)
+      jwt.ts                # signAccessToken/verifyAccessToken, generateRefreshToken/hashRefreshToken
     errors/
       AppError.ts          # base + typed errors (NotFoundError, InsufficientStock, ...)
     utils/
@@ -59,10 +63,12 @@ src/
 
   features/                # ← every feature is a self-contained vertical slice
     auth/
-      routes.ts
+      routes.ts             # customer /api/v1/auth/*, staff /api/v1/admin/auth/*
       controller.ts
-      service.ts            # Clerk webhook handling, profile sync
+      service.ts             # register/login/refresh/logout, lockout, refresh-token rotation + reuse detection
+      repository.ts
       schema.ts
+      cookies.ts             # httpOnly refresh-token cookie config (separate customer/staff cookies)
       index.ts
 
     catalog/                # categories, collections, products, variants, banners
@@ -201,9 +207,10 @@ A controller never imports a repository directly. A repository never contains bu
 There is no multi-tenancy in REBY, but there **is** a hard boundary between customer and staff access, enforced in two layers:
 
 ### 1. Middleware
-- `requireCustomer` — verifies the Clerk session, loads/creates the corresponding `User` row, attaches `req.user`. Used on all customer routes (cart, wishlist, orders, etc.).
-- `requireStaff(minRole)` — verifies the Clerk session, requires a matching `StaffProfile` row with `role >= minRole` (`STAFF < MANAGER < OWNER`), attaches `req.staff`. Used on all `/admin` routes.
+- `requireCustomer` — verifies the access-token JWT (`Authorization: Bearer <token>`) **statelessly** (signature + expiry only, no DB hit), checks the `type` claim is `"customer"`, attaches `req.user = { id, email }` directly from the token payload. Used on all customer routes (cart, wishlist, orders, etc.).
+- `requireStaff(minRole)` — verifies the access-token JWT statelessly, checks `type: "staff"` and `role >= minRole` (`STAFF < MANAGER < OWNER`) from the token's own claims, attaches `req.staff = { id, email, role }`. Used on all `/admin` routes.
 - A route is never left without one of these two (or an explicit `public` marker for genuinely public catalog-browsing routes).
+- **Tradeoff, by design:** since access tokens aren't re-checked against the DB, an account deactivation/role change/lock takes up to `ACCESS_TOKEN_TTL_MINUTES` (default 15) to reach an already-issued token. The refresh endpoint *does* hit the DB (see below), so the delay is bounded by the access-token TTL, not the (much longer) refresh-token TTL.
 
 ### 2. Repository-level ownership scoping
 - Every repository method touching a customer-owned table (`Cart`, `Order`, `Address`, `Wishlist`, `Notification`, `RecentlyViewed`) requires the caller to pass `userId`, and the method injects `WHERE userId = :userId` into the query. A developer cannot fetch, update, or delete another customer's row through the customer-facing repositories — the filter is not optional.
@@ -216,12 +223,14 @@ There is no multi-tenancy in REBY, but there **is** a hard boundary between cust
 | | Customer | Staff / Admin |
 |---|---|---|
 | Identity table | `users` | `staff_profiles` |
-| Clerk session | Yes | Yes |
-| Distinguishing claim | Clerk `publicMetadata.role` absent or `"customer"` | Clerk `publicMetadata.role` = `"staff"` \| `"manager"` \| `"owner"` |
+| Password hashing | argon2id (`core/security/password.ts`) | argon2id |
+| Access token | Signed JWT, 15 min TTL, `Authorization: Bearer` | Signed JWT, 15 min TTL, `Authorization: Bearer` |
+| Refresh token | Opaque, 30-day TTL, `reby_refresh_token` httpOnly cookie, path `/api/v1/auth` | Opaque, 30-day TTL, `reby_staff_refresh_token` httpOnly cookie, path `/api/v1/admin/auth` |
+| Distinguishing claim | JWT `type: "customer"` | JWT `type: "staff"` (+ `role`) |
 | Middleware | `requireCustomer` | `requireStaff(minRole)` |
 | Scope | Own data only | Cross-customer, audited |
 
-A staff Clerk account and a customer Clerk account are always different Clerk users — REBY does not allow one identity to hold both roles. Middleware rejects a request if the session's role doesn't match what the route requires.
+A customer account and a staff account are always separate rows in separate tables (`users` vs `staff_profiles`) — REBY does not allow one identity to hold both roles. Access-token JWTs are signed with `JWT_ACCESS_SECRET` and carry `{ sub: <row id>, type, email, role? }`; they are verified statelessly (no DB hit — see the tradeoff noted above). Refresh tokens are opaque 256-bit random values; only their SHA-256 hash is stored server-side (`refresh_tokens.token_hash`), so a DB leak doesn't expose usable tokens. Every refresh **rotates**: the old `RefreshToken` row is marked `revokedAt` + `replacedByTokenHash`, a new row is issued. Replaying an already-rotated (or already-logged-out) refresh token is treated as token theft and **revokes every other active refresh token for that account** (family revocation), forcing a full re-login everywhere. Customers self-register via `POST /api/v1/auth/register`; staff accounts are provisioned separately (direct DB/seed for now — no self-service staff signup) and log in via `POST /api/v1/admin/auth/login`. Both flows also enforce account lockout (5 consecutive failed logins → 15-minute lock, `failedLoginAttempts`/`lockedUntil`) and pay a constant argon2 `verify()` cost even for a nonexistent email, so login failure responses can't be used to enumerate accounts by content or timing.
 
 ---
 
