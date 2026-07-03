@@ -540,7 +540,7 @@ export const openApiDocument: JsonObject = {
       patch: {
         summary: 'Update a category (STAFF+)',
         description:
-          'All fields optional. Changing parentId is rejected if it would set the category as its own ancestor.',
+          'All fields optional. Changing parentId re-runs the same existence/active check as create, plus a cycle check (rejected if it would set the category as its own ancestor).',
         tags: ['Catalog — Categories (admin)'],
         security: [{ bearerAuth: [] }],
         parameters: [categoryIdParam],
@@ -554,7 +554,31 @@ export const openApiDocument: JsonObject = {
               },
             },
           },
-          '404': categoryNotFoundResponse,
+          '404': {
+            description:
+              'Either the :id in the path does not exist, or (if parentId is being changed) the new parentId does not reference an existing, active category — same parent validation as create.',
+            content: {
+              'application/json': {
+                schema: errorEnvelope('NOT_FOUND', 'Category not found'),
+                examples: {
+                  categoryNotFound: {
+                    summary: 'The category being updated does not exist',
+                    value: {
+                      success: false,
+                      error: { code: 'NOT_FOUND', message: 'Category not found' },
+                    },
+                  },
+                  parentNotFound: {
+                    summary: 'parentId does not reference an existing, active category',
+                    value: {
+                      success: false,
+                      error: { code: 'NOT_FOUND', message: 'Parent category not found' },
+                    },
+                  },
+                },
+              },
+            },
+          },
           '409': {
             description:
               'Duplicate slug, or parentId would create a cycle (self or descendant as ancestor)',

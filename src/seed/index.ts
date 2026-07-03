@@ -3,8 +3,11 @@ import { prisma } from '@/db/prisma';
 import { seedAdmin } from './admin';
 import { seedCategories } from './categories';
 import { seedCustomer } from './customer';
+import { assertNotProduction } from './guard';
 
 async function main(): Promise<void> {
+  assertNotProduction();
+
   console.log('Seeding admin...');
   await seedAdmin();
 
