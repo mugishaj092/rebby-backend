@@ -6,7 +6,11 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-  CLERK_SECRET_KEY: z.string().min(1, 'CLERK_SECRET_KEY is required'),
+  // Access-token signing secret — deliberately distinct from any refresh-token secret
+  // (refresh tokens are opaque + SHA-256 hashed, not signed, so no secret is needed there).
+  JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET is required and must be at least 32 characters'),
+  ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().positive().default(15),
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
   REDIS_URL: z.string().min(1, 'REDIS_URL is required'),
   CLOUDINARY_URL: z.string().min(1, 'CLOUDINARY_URL is required'),
   FCM_SERVER_KEY: z.string().min(1, 'FCM_SERVER_KEY is required'),

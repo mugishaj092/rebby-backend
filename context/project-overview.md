@@ -17,10 +17,10 @@ This first build covers the **commerce core**: catalog, cart, checkout, orders, 
 | **Customer** | Anyone shopping on the mobile app | Browse, buy, track their own orders, manage their own profile/wishlist |
 | **Staff / Admin** | People running the store | Manage products, inventory, orders, promotions, and view business reports |
 
-Both authenticate through **Clerk**, but are treated as two distinct access levels in the API:
+Both authenticate via **email + password** (argon2id-hashed, short-lived access-token JWTs + rotating httpOnly-cookie refresh tokens), but are treated as two distinct access levels in the API:
 
-- A customer's Clerk session maps to a `User` row.
-- A staff member's Clerk session maps to a `StaffProfile` row carrying a `role` (`OWNER`, `MANAGER`, `STAFF`).
+- A customer's access token maps to a `User` row.
+- A staff member's access token maps to a `StaffProfile` row carrying a `role` (`OWNER`, `MANAGER`, `STAFF`).
 - Every route is explicitly customer-only, staff-only, or public — never ambiguous. A customer session can never reach an admin route and vice versa, enforced by dedicated middleware (`requireCustomer`, `requireStaff(minRole)`), not by convention.
 
 ---
@@ -36,7 +36,7 @@ Admin routes are the exception: staff can read/act across all customers' orders 
 ## Modules (this build)
 
 ```
-Auth            → customer auth (Clerk), staff auth (Clerk + role), profile
+Auth            → customer auth (email + password + JWT), staff auth (email + password + JWT + role), profile
 Catalog         → categories, collections, products, variants, banners
 Discovery       → search, filtering, sorting, recently viewed
 Cart            → cart, cart items, promo code application
@@ -107,7 +107,7 @@ PENDING → CONFIRMED → PREPARING → PACKED → SHIPPED → OUT_FOR_DELIVERY 
 
 ## In Scope (this build)
 
-- Customer auth (Clerk) + staff auth (Clerk + role) with strict access-level separation
+- Customer auth (email + password + JWT) + staff auth (email + password + JWT + role) with strict access-level separation
 - Catalog: categories, collections, products, variants, banners
 - Search, filtering, sorting, recently viewed
 - Cart with promo code application

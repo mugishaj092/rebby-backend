@@ -13,9 +13,11 @@ erDiagram
     USER ||--o{ ORDER : places
     USER ||--o{ NOTIFICATION : receives
     USER ||--o{ RECENTLY_VIEWED : views
+    USER ||--o{ REFRESH_TOKEN : "session for"
 
     STAFF_PROFILE ||--o{ ORDER_STATUS_HISTORY : records
     STAFF_PROFILE ||--o{ REFUND_REQUEST : reviews
+    STAFF_PROFILE ||--o{ REFRESH_TOKEN : "session for"
 
     CATEGORY ||--o{ CATEGORY : "parent/child"
     CATEGORY ||--o{ PRODUCT : classifies
@@ -49,22 +51,39 @@ erDiagram
 
     USER {
         string id PK
-        string clerkId UK
         string name
         string email UK
+        string passwordHash
         string phone
         boolean notificationsEnabled
         string deviceToken
+        int failedLoginAttempts
+        datetime lockedUntil
         datetime deletedAt
     }
 
     STAFF_PROFILE {
         string id PK
-        string clerkId UK
         string name
         string email UK
+        string passwordHash
         enum role "staff | manager | owner"
         boolean isActive
+        int failedLoginAttempts
+        datetime lockedUntil
+    }
+
+    REFRESH_TOKEN {
+        string id PK
+        string tokenHash UK "SHA-256 of the opaque raw token; raw value never stored"
+        string tokenType "customer | staff"
+        string userId FK "exactly one of userId/staffId set (DB CHECK)"
+        string staffId FK
+        datetime expiresAt
+        datetime revokedAt
+        string replacedByTokenHash "set on rotation"
+        string ipAddress
+        string userAgent
     }
 
     ADDRESS {
@@ -281,8 +300,9 @@ erDiagram
 ## Domain Groups
 
 ### Identity
-- **User** — customer account, linked to Clerk auth (`clerkId`). Soft-deletable. Owns addresses, a cart, a wishlist, orders, notifications, and view history.
-- **StaffProfile** — internal staff/manager/owner accounts (separate from `User`), also Clerk-backed. Tracks order status changes and refund request reviews.
+- **User** — customer account, authenticated via email + argon2id-hashed password (`passwordHash`). Soft-deletable. `failedLoginAttempts`/`lockedUntil` back account lockout (5 failures → 15-minute lock). Owns addresses, a cart, a wishlist, orders, notifications, and view history.
+- **StaffProfile** — internal staff/manager/owner accounts (separate from `User`), also email + `passwordHash` authenticated, with its own lockout fields. Tracks order status changes and refund request reviews.
+- **RefreshToken** — long-lived, opaque, rotating session token backing the httpOnly-cookie refresh flow for either a `User` or a `StaffProfile` (exactly one of `userId`/`staffId`, enforced by both app code and a DB `CHECK` constraint). Only the SHA-256 hash is stored; rotation on every use sets `revokedAt`/`replacedByTokenHash` on the old row. Replaying an already-revoked row is reuse detection — the entire family (every other active row for that account) gets revoked.
 - **Address** — delivery address, belongs to a `User`; referenced by `Order` (an order snapshots which address it shipped to).
 
 ### Catalog
@@ -317,6 +337,6 @@ erDiagram
 - **UUIDs everywhere** for primary keys; no auto-increment ints.
 - **Snapshotting** — `OrderItem` copies product name/size/color/price at purchase time so historical orders remain accurate after catalog changes.
 - **Soft deletes** — `User` and `Product` use `deletedAt` instead of hard deletion, preserving order history integrity.
-- **Separate identity tables** — `User` (customers) and `StaffProfile` (internal staff) are intentionally distinct models, both backed by Clerk, reflecting different access levels.
+- **Separate identity tables** — `User` (customers) and `StaffProfile` (internal staff) are intentionally distinct models, each with its own `passwordHash`, reflecting different access levels.
 - **Refund vs RefundRequest** — a `RefundRequest` is the customer's ask and staff's review workflow; a `Refund` is the resulting financial transaction. An order can have a request without a resulting refund (rejected) or a refund without matching 1:1 to requests.
 - **Coupons are dual-purpose** — attached to `Cart` (live preview of discount) and copied onto `Order` (locked-in discount at checkout).

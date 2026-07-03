@@ -7,7 +7,9 @@ All config is loaded through `config/env.ts`, Zod-validated at boot. Never hardc
 | Variable | Used in |
 |---|---|
 | `DATABASE_URL` | `prisma/schema.prisma`, Prisma Client |
-| `CLERK_SECRET_KEY` | `core/middleware/requireCustomer.ts`, `requireStaff.ts` |
+| `JWT_ACCESS_SECRET` | `core/security/jwt.ts` (sign/verify access tokens), used by `core/middleware/requireCustomer.ts`/`requireStaff.ts` |
+| `ACCESS_TOKEN_TTL_MINUTES` | `core/security/jwt.ts` |
+| `REFRESH_TOKEN_TTL_DAYS` | `features/auth/service.ts`, `features/auth/cookies.ts` |
 | `REDIS_URL` | `config/redis.ts`, BullMQ queues |
 | `CLOUDINARY_URL` | `config/cloudinary.ts` |
 | `FCM_SERVER_KEY` | `config/fcm.ts` |
@@ -20,7 +22,8 @@ All config is loaded through `config/env.ts`, Zod-validated at boot. Never hardc
 
 - `express`, `@prisma/client`, `prisma`
 - `zod`
-- `@clerk/express` (or current Clerk Node SDK)
+- `argon2`, `jsonwebtoken` — argon2id password hashing and access-token JWTs (customer + staff auth)
+- `express-rate-limit`, `helmet`, `cookie-parser` — auth hardening (IP rate limiting, security headers, refresh-token cookie parsing)
 - `ioredis`, `bullmq`
 - `cloudinary`
 - `firebase-admin`

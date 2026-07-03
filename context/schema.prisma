@@ -76,12 +76,14 @@ enum RefundRequestStatus {
 // ============================================================
 model User {
   id                    String    @id @default(uuid())
-  clerkId               String    @unique @map("clerk_id")
   name                  String    @db.VarChar(191)
   email                 String    @unique @db.VarChar(191)
+  passwordHash          String    @map("password_hash") @db.VarChar(255)
   phone                 String?   @db.VarChar(50)
   notificationsEnabled  Boolean   @default(true) @map("notifications_enabled")
   deviceToken           String?   @map("device_token") @db.VarChar(255)
+  failedLoginAttempts   Int       @default(0) @map("failed_login_attempts")
+  lockedUntil           DateTime? @map("locked_until") @db.Timestamptz(6)
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt             DateTime? @map("deleted_at") @db.Timestamptz(6)
@@ -92,24 +94,50 @@ model User {
   orders          Order[]
   notifications   Notification[]
   recentlyViewed  RecentlyViewed[]
+  refreshTokens   RefreshToken[]
 
   @@map("users")
 }
 
 model StaffProfile {
-  id        String    @id @default(uuid())
-  clerkId   String    @unique @map("clerk_id")
-  name      String    @db.VarChar(191)
-  email     String    @unique @db.VarChar(191)
-  role      StaffRole @default(staff)
-  isActive  Boolean   @default(true) @map("is_active")
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                  String    @id @default(uuid())
+  name                String    @db.VarChar(191)
+  email               String    @unique @db.VarChar(191)
+  passwordHash        String    @map("password_hash") @db.VarChar(255)
+  role                StaffRole @default(staff)
+  isActive            Boolean   @default(true) @map("is_active")
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   statusChanges OrderStatusHistory[]
   refundReviews RefundRequest[]
+  refreshTokens RefreshToken[]
 
   @@map("staff_profiles")
+}
+
+model RefreshToken {
+  id                  String    @id @default(uuid())
+  tokenHash           String    @unique @map("token_hash") @db.VarChar(64)
+  tokenType           String    @map("token_type") @db.VarChar(20)
+  userId              String?   @map("user_id")
+  staffId             String?   @map("staff_id")
+  expiresAt           DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt           DateTime? @map("revoked_at") @db.Timestamptz(6)
+  replacedByTokenHash String?   @map("replaced_by_token_hash") @db.VarChar(64)
+  ipAddress           String?   @map("ip_address") @db.VarChar(45)
+  userAgent           String?   @map("user_agent") @db.VarChar(255)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user  User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  staff StaffProfile? @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([staffId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }
 
 model Address {
