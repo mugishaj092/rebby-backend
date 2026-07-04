@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '@/app';
 import { signAccessToken } from '@/core/security/jwt';
 import { prisma } from '@/db/prisma';
-import { catalogRepository } from '@/features/catalog/repository';
+import { productsRepository } from '@/features/products/repository';
 import { Prisma } from '@/generated/prisma/client';
 import { StaffRole } from '@/generated/prisma/enums';
 
@@ -53,7 +53,7 @@ function baseVariant(overrides: Record<string, unknown> = {}): Record<string, un
   };
 }
 
-describe('features/catalog products & variants routes', () => {
+describe('features/products routes', () => {
   const app = createApp();
   const createdProductIds: string[] = [];
   const createdCategoryIds: string[] = [];
@@ -163,18 +163,9 @@ describe('features/catalog products & variants routes', () => {
         .set('Authorization', `Bearer ${staffToken(StaffRole.staff)}`);
       expect(response.status).toBe(403);
     });
-
-    it('DELETE /api/v1/admin/variants/:id with a staff-role session (below MANAGER) is rejected with 403', async () => {
-      const created = await createProductViaApi();
-      const variantId = created.body.data.variants[0].id;
-      const response = await request(app)
-        .delete(`/api/v1/admin/variants/${variantId}`)
-        .set('Authorization', `Bearer ${staffToken(StaffRole.staff)}`);
-      expect(response.status).toBe(403);
-    });
   });
 
-  describe('SKU uniqueness', () => {
+  describe('SKU uniqueness (within product creation)', () => {
     it('rejects two variants with the same SKU in one request, before any DB write', async () => {
       const sku = uniqueSku();
       const response = await createProductViaApi({
@@ -194,85 +185,6 @@ describe('features/catalog products & variants routes', () => {
       expect(first.status).toBe(201);
 
       const response = await createProductViaApi({ variants: [baseVariant({ sku: existingSku })] });
-
-      expect(response.status).toBe(409);
-      expect(response.body.error.code).toBe('CONFLICT');
-    });
-
-    it('rejects adding a variant whose SKU already exists elsewhere', async () => {
-      const existingSku = uniqueSku();
-      const owner = await createProductViaApi({ variants: [baseVariant({ sku: existingSku })] });
-      const other = await createProductViaApi();
-      void owner;
-
-      const response = await request(app)
-        .post(`/api/v1/admin/products/${other.body.data.id}/variants`)
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send(baseVariant({ sku: existingSku, size: 'XL' }));
-
-      expect(response.status).toBe(409);
-    });
-
-    it('rejects updating a variant to a SKU that already exists on another variant', async () => {
-      const existingSku = uniqueSku();
-      await createProductViaApi({ variants: [baseVariant({ sku: existingSku })] });
-      const other = await createProductViaApi();
-      const otherVariantId = other.body.data.variants[0].id;
-
-      const response = await request(app)
-        .patch(`/api/v1/admin/variants/${otherVariantId}`)
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send({ sku: existingSku });
-
-      expect(response.status).toBe(409);
-    });
-  });
-
-  describe('add variant to an existing product', () => {
-    it('adds a new variant to an existing product', async () => {
-      const product = await createProductViaApi({ variants: [baseVariant({ size: 'S' })] });
-
-      const response = await request(app)
-        .post(`/api/v1/admin/products/${product.body.data.id}/variants`)
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send(baseVariant({ size: 'M' }));
-
-      expect(response.status).toBe(201);
-      expect(response.body.data.productId).toBe(product.body.data.id);
-    });
-
-    it('returns 404 adding a variant to a nonexistent product', async () => {
-      const response = await request(app)
-        .post(`/api/v1/admin/products/${randomUUID()}/variants`)
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send(baseVariant());
-
-      expect(response.status).toBe(404);
-    });
-
-    it('accepts a priceOverride on the new variant', async () => {
-      const product = await createProductViaApi({ variants: [baseVariant({ size: 'S' })] });
-
-      const response = await request(app)
-        .post(`/api/v1/admin/products/${product.body.data.id}/variants`)
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send(baseVariant({ size: 'M', priceOverride: '15.00' }));
-
-      expect(response.status).toBe(201);
-      expect(response.body.data.priceOverride).toBe('15');
-    });
-  });
-
-  describe('productId + size + color uniqueness', () => {
-    it('rejects adding a variant with the same size/color combo twice for one product', async () => {
-      const product = await createProductViaApi({
-        variants: [baseVariant({ size: 'M', color: 'Red' })],
-      });
-
-      const response = await request(app)
-        .post(`/api/v1/admin/products/${product.body.data.id}/variants`)
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send(baseVariant({ size: 'M', color: 'Red' }));
 
       expect(response.status).toBe(409);
       expect(response.body.error.code).toBe('CONFLICT');
@@ -328,69 +240,6 @@ describe('features/catalog products & variants routes', () => {
         .set('Authorization', `Bearer ${staffToken(StaffRole.manager)}`);
 
       expect(response.status).toBe(200);
-    });
-  });
-
-  describe('updateVariant — administrative stock correction', () => {
-    it('allows a staff member to directly adjust stock', async () => {
-      const product = await createProductViaApi({ variants: [baseVariant({ stock: 5 })] });
-      const variantId = product.body.data.variants[0].id;
-
-      const response = await request(app)
-        .patch(`/api/v1/admin/variants/${variantId}`)
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send({ stock: 42 });
-
-      expect(response.status).toBe(200);
-      expect(response.body.data.stock).toBe(42);
-    });
-
-    it('returns 404 updating a nonexistent variant', async () => {
-      const response = await request(app)
-        .patch(`/api/v1/admin/variants/${randomUUID()}`)
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send({ stock: 1 });
-      expect(response.status).toBe(404);
-    });
-
-    it('updates size, color, sku, and priceOverride together', async () => {
-      const product = await createProductViaApi({ variants: [baseVariant({ size: 'S' })] });
-      const variantId = product.body.data.variants[0].id;
-      const newSku = uniqueSku('UPDATED');
-
-      const response = await request(app)
-        .patch(`/api/v1/admin/variants/${variantId}`)
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send({ size: 'XL', color: 'Green', sku: newSku, priceOverride: '12.00' });
-
-      expect(response.status).toBe(200);
-      expect(response.body.data.size).toBe('XL');
-      expect(response.body.data.color).toBe('Green');
-      expect(response.body.data.sku).toBe(newSku);
-      expect(response.body.data.priceOverride).toBe('12');
-    });
-
-    it('returns 404 deleting a nonexistent variant', async () => {
-      const response = await request(app)
-        .delete(`/api/v1/admin/variants/${randomUUID()}`)
-        .set('Authorization', `Bearer ${staffToken(StaffRole.manager)}`);
-      expect(response.status).toBe(404);
-    });
-
-    it('DELETE /api/v1/admin/variants/:id with a MANAGER session removes the variant', async () => {
-      const product = await createProductViaApi({
-        variants: [baseVariant({ size: 'S' }), baseVariant({ size: 'M' })],
-      });
-      const variantId = product.body.data.variants[0].id;
-
-      const response = await request(app)
-        .delete(`/api/v1/admin/variants/${variantId}`)
-        .set('Authorization', `Bearer ${staffToken(StaffRole.manager)}`);
-
-      expect(response.status).toBe(200);
-
-      const row = await prisma.productVariant.findUnique({ where: { id: variantId } });
-      expect(row).toBeNull();
     });
   });
 
@@ -506,7 +355,7 @@ describe('features/catalog products & variants routes', () => {
 
     it('rejects with a ConflictError when no unique slug can be generated', async () => {
       const spy = vi
-        .spyOn(catalogRepository, 'findProductBySlug')
+        .spyOn(productsRepository, 'findProductBySlug')
         .mockResolvedValue({ id: randomUUID() } as never);
 
       const response = await createProductViaApi({ name: uniqueName('AlwaysCollidesProduct') });
@@ -540,10 +389,10 @@ describe('features/catalog products & variants routes', () => {
         .delete(`/api/v1/admin/products/${product.body.data.id}`)
         .set('Authorization', `Bearer ${staffToken(StaffRole.manager)}`);
 
-      const excluded = await catalogRepository.findProductById(product.body.data.id);
+      const excluded = await productsRepository.findProductById(product.body.data.id);
       expect(excluded).toBeNull();
 
-      const included = await catalogRepository.findProductById(product.body.data.id, {
+      const included = await productsRepository.findProductById(product.body.data.id, {
         includeDeleted: true,
       });
       expect(included?.id).toBe(product.body.data.id);
@@ -553,7 +402,7 @@ describe('features/catalog products & variants routes', () => {
   describe('race guard (TOCTOU between pre-check and write)', () => {
     it('maps a concurrent unique-constraint violation on create (slug) to a clean 409 with a slug-specific message', async () => {
       const spy = vi
-        .spyOn(catalogRepository, 'createProductWithVariants')
+        .spyOn(productsRepository, 'createProductWithVariants')
         .mockRejectedValueOnce(uniqueConflictError(['slug']));
 
       const response = await createProductViaApi();
@@ -565,15 +414,13 @@ describe('features/catalog products & variants routes', () => {
     });
 
     it('also maps the classic meta.target shape (forward-compat) to the same slug-specific message', async () => {
-      const spy = vi
-        .spyOn(catalogRepository, 'createProductWithVariants')
-        .mockRejectedValueOnce(
-          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-            code: 'P2002',
-            clientVersion: '7.8.0',
-            meta: { target: ['slug'] },
-          }),
-        );
+      const spy = vi.spyOn(productsRepository, 'createProductWithVariants').mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: '7.8.0',
+          meta: { target: ['slug'] },
+        }),
+      );
 
       const response = await createProductViaApi();
 
@@ -584,7 +431,7 @@ describe('features/catalog products & variants routes', () => {
 
     it('maps a concurrent unique-constraint violation on create (sku) to a clean 409', async () => {
       const spy = vi
-        .spyOn(catalogRepository, 'createProductWithVariants')
+        .spyOn(productsRepository, 'createProductWithVariants')
         .mockRejectedValueOnce(uniqueConflictError(['sku']));
 
       const response = await createProductViaApi();
@@ -595,7 +442,7 @@ describe('features/catalog products & variants routes', () => {
 
     it('maps a concurrent unique-constraint violation on create (size+color) to a clean 409', async () => {
       const spy = vi
-        .spyOn(catalogRepository, 'createProductWithVariants')
+        .spyOn(productsRepository, 'createProductWithVariants')
         .mockRejectedValueOnce(uniqueConflictError(['product_id', 'size', 'color']));
 
       const response = await createProductViaApi();
@@ -606,7 +453,7 @@ describe('features/catalog products & variants routes', () => {
 
     it('maps an unrecognized unique-constraint target to a generic clean 409', async () => {
       const spy = vi
-        .spyOn(catalogRepository, 'createProductWithVariants')
+        .spyOn(productsRepository, 'createProductWithVariants')
         .mockRejectedValueOnce(uniqueConflictError(['something_else']));
 
       const response = await createProductViaApi();
@@ -616,7 +463,7 @@ describe('features/catalog products & variants routes', () => {
     });
 
     it('maps a P2002 with no recognizable meta shape at all to a generic clean 409', async () => {
-      const spy = vi.spyOn(catalogRepository, 'createProductWithVariants').mockRejectedValueOnce(
+      const spy = vi.spyOn(productsRepository, 'createProductWithVariants').mockRejectedValueOnce(
         new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
           code: 'P2002',
           clientVersion: '7.8.0',
@@ -632,7 +479,7 @@ describe('features/catalog products & variants routes', () => {
 
     it('rethrows a non-P2002 error from create instead of swallowing it', async () => {
       const spy = vi
-        .spyOn(catalogRepository, 'createProductWithVariants')
+        .spyOn(productsRepository, 'createProductWithVariants')
         .mockRejectedValueOnce(new Error('unexpected db failure'));
 
       const response = await createProductViaApi();

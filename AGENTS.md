@@ -69,7 +69,7 @@ Shared, cross-cutting code lives in `src/core/` and `src/db/` — **not** inside
 - A feature owns its full stack; nothing feature-specific lives outside its folder.
 - **Cross-feature calls go through services only.** `orders/service.ts` may call `inventory.service.commitOrderStock`, but must never import another feature's `repository.ts` directly.
 - `core/` holds code used by two or more features (middleware, error types, shared Zod helpers). If it's used by one feature only, it stays in that feature.
-- Dependency direction flows one way: `orders`/`payments` → `inventory` → `catalog` → `core`. No circular imports.
+- Dependency direction flows one way: `orders`/`payments` → `inventory` → `variants`/`collections`/`banners`/`home` → `products`/`categories` → `core`. No circular imports — see `architecture.md`'s "No circular dependencies" note for the granular graph within the former "catalog" area (`categories`, `products`, `variants`, `collections`, `banners`, `home`).
 - **`inventory` has no routes** — it's a service-only internal feature owned entirely by `orders` (and later `admin`) calling into it.
 
 Full annotated tree is in `architecture.md`.

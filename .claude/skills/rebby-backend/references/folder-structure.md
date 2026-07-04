@@ -10,7 +10,12 @@ src/
   db/prisma.ts       # single PrismaClient instance
   features/
     auth/
-    catalog/
+    categories/
+    products/        # Product + ProductImage (variants live in their own feature)
+    variants/        # ProductVariant — routes nested under a product id, owned here
+    collections/
+    banners/
+    home/            # service-only composition of collections + banners for GET /home
     discovery/
     cart/
     wishlist/
@@ -46,4 +51,6 @@ routes.ts  →  controller.ts  →  service.ts  →  repository.ts  →  Prisma 
 - Cross-feature calls go through `service.ts` only. `orders/service.ts` may call `inventory.service.commitOrderStock`, but must never import `inventory/repository.ts` directly.
 - `core/` and `db/` are not features — they hold code used by 2+ features (middleware, error types, the Prisma client). Single-feature code stays in that feature.
 - `inventory/` has no routes — it's an internal service-only feature, called by `orders` (and later `admin`).
-- Dependency direction: `orders`/`payments` → `inventory` → `catalog` → `core`. No circular imports.
+- Dependency direction: `orders`/`payments` → `inventory` → `variants`/`collections`/`banners`/`home` → `products`/`categories` → `core`. No circular imports.
+  - Granular graph: `products → categories`, `variants → products`, `collections → products`, `banners → products, categories, collections`, `home → collections, banners`.
+  - Two narrow exceptions avoid an otherwise-circular dependency: `categories/repository.ts` and `products/repository.ts` each query one foreign table directly (`products`, `product_variants`) via the shared Prisma client rather than calling the other feature's service — see `architecture.md`'s "No circular dependencies" note for why.

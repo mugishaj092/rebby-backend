@@ -1,16 +1,12 @@
 import { Router } from 'express';
 
 import { authRouter, debugRouter, staffAuthRouter } from '@/features/auth/routes';
-import {
-  adminBannersRouter,
-  adminCategoriesRouter,
-  adminCollectionsRouter,
-  adminProductsRouter,
-  adminVariantsRouter,
-  categoriesRouter,
-  collectionsRouter,
-  homeRouter,
-} from '@/features/catalog/routes';
+import { adminBannersRouter } from '@/features/banners/routes';
+import { adminCategoriesRouter, categoriesRouter } from '@/features/categories/routes';
+import { adminCollectionsRouter, collectionsRouter } from '@/features/collections/routes';
+import { homeRouter } from '@/features/home/routes';
+import { adminProductsRouter } from '@/features/products/routes';
+import { adminVariantsRouter, productVariantsRouter } from '@/features/variants/routes';
 
 export const apiRouter = Router();
 
@@ -19,6 +15,7 @@ apiRouter.use('/admin/auth', staffAuthRouter);
 apiRouter.use('/categories', categoriesRouter);
 apiRouter.use('/admin/categories', adminCategoriesRouter);
 apiRouter.use('/admin/products', adminProductsRouter);
+apiRouter.use('/admin/products/:id/variants', productVariantsRouter);
 apiRouter.use('/admin/variants', adminVariantsRouter);
 apiRouter.use('/home', homeRouter);
 apiRouter.use('/collections', collectionsRouter);

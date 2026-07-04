@@ -6,8 +6,8 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '@/app';
 import { signAccessToken } from '@/core/security/jwt';
 import { prisma } from '@/db/prisma';
-import { catalogRepository } from '@/features/catalog/repository';
-import * as catalogService from '@/features/catalog/service';
+import { categoriesRepository } from '@/features/categories/repository';
+import * as categoriesService from '@/features/categories/service';
 import { Prisma } from '@/generated/prisma/client';
 import { StaffRole } from '@/generated/prisma/enums';
 
@@ -35,7 +35,7 @@ function staffToken(role: StaffRole = StaffRole.staff): string {
   });
 }
 
-describe('features/catalog routes', () => {
+describe('features/categories routes', () => {
   const app = createApp();
   const createdCategoryIds: string[] = [];
 
@@ -354,7 +354,7 @@ describe('features/catalog routes', () => {
         data: { isActive: false },
       });
 
-      const tree = await catalogService.getCategoryTree(false);
+      const tree = await categoriesService.getCategoryTree(false);
       const ids = tree.map((node) => node.id);
 
       expect(ids).toContain(hidden.body.data.id);
@@ -364,7 +364,7 @@ describe('features/catalog routes', () => {
   describe('slug collision exhaustion', () => {
     it('rejects with a ConflictError when no unique slug can be generated', async () => {
       const spy = vi
-        .spyOn(catalogRepository, 'findCategoryBySlug')
+        .spyOn(categoriesRepository, 'findCategoryBySlug')
         .mockResolvedValue({ id: randomUUID() } as never);
 
       const response = await request(app)
@@ -380,7 +380,7 @@ describe('features/catalog routes', () => {
   describe('slug uniqueness race guard (TOCTOU between pre-check and write)', () => {
     it('maps a concurrent unique-constraint violation on create to a clean 409, not a raw error', async () => {
       const spy = vi
-        .spyOn(catalogRepository, 'createCategory')
+        .spyOn(categoriesRepository, 'createCategory')
         .mockRejectedValueOnce(uniqueSlugConflictError());
 
       const response = await request(app)
@@ -396,7 +396,7 @@ describe('features/catalog routes', () => {
     it('maps a concurrent unique-constraint violation on update to a clean 409, not a raw error', async () => {
       const created = await createCategoryViaApi();
       const spy = vi
-        .spyOn(catalogRepository, 'updateCategory')
+        .spyOn(categoriesRepository, 'updateCategory')
         .mockRejectedValueOnce(uniqueSlugConflictError());
 
       const response = await request(app)
@@ -411,7 +411,7 @@ describe('features/catalog routes', () => {
 
     it('rethrows a non-P2002 error from the write instead of swallowing it', async () => {
       const spy = vi
-        .spyOn(catalogRepository, 'createCategory')
+        .spyOn(categoriesRepository, 'createCategory')
         .mockRejectedValueOnce(new Error('unexpected db failure'));
 
       const response = await request(app)
@@ -458,7 +458,7 @@ describe('features/catalog routes', () => {
         parentId: parent.body.data.id,
       });
 
-      const results = await catalogRepository.listCategories({});
+      const results = await categoriesRepository.listCategories({});
       const ids = results.map((c) => c.id);
 
       expect(ids).toContain(parent.body.data.id);
@@ -475,7 +475,7 @@ describe('features/catalog routes', () => {
       });
       const outsider = await createCategoryViaApi({ name: uniqueName('VanishingOutsider') });
 
-      const spy = vi.spyOn(catalogRepository, 'findCategoryById').mockImplementation(((
+      const spy = vi.spyOn(categoriesRepository, 'findCategoryById').mockImplementation(((
         id: string,
       ) => {
         if (id === a.body.data.id) {
@@ -497,7 +497,7 @@ describe('features/catalog routes', () => {
   describe('error forwarding', () => {
     it('forwards unexpected listCategories errors to the error handler instead of crashing', async () => {
       const spy = vi
-        .spyOn(catalogService, 'listCategories')
+        .spyOn(categoriesService, 'listCategories')
         .mockRejectedValueOnce(new Error('boom'));
 
       const response = await request(app).get('/api/v1/categories');
@@ -508,7 +508,7 @@ describe('features/catalog routes', () => {
 
     it('forwards unexpected getCategoryTree errors to the error handler instead of crashing', async () => {
       const spy = vi
-        .spyOn(catalogService, 'getCategoryTree')
+        .spyOn(categoriesService, 'getCategoryTree')
         .mockRejectedValueOnce(new Error('boom'));
 
       const response = await request(app).get('/api/v1/categories/tree');
