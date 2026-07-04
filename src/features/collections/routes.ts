@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { requireStaff } from '@/core/middleware/requireStaff';
 import { validate } from '@/core/middleware/validate';
+import { cursorPaginationQuerySchema } from '@/core/validation/pagination';
 import { StaffRole } from '@/generated/prisma/enums';
 
 import {
@@ -9,6 +10,7 @@ import {
   deleteCollection,
   getCollectionBySlug,
   listActiveCollections,
+  listCollectionProducts,
   updateCollection,
   updateCollectionProducts,
 } from './controller';
@@ -24,6 +26,12 @@ import {
 export const collectionsRouter = Router();
 
 collectionsRouter.get('/', listActiveCollections);
+collectionsRouter.get(
+  '/:slug/products',
+  validate(collectionSlugParamsSchema, 'params'),
+  validate(cursorPaginationQuerySchema, 'query'),
+  listCollectionProducts,
+);
 collectionsRouter.get(
   '/:slug',
   validate(collectionSlugParamsSchema, 'params'),

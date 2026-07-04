@@ -175,6 +175,18 @@ export async function collectionExists(id: string): Promise<boolean> {
   return collection !== null;
 }
 
+// Used to resolve a slug to an id for the /collections/:slug/products listing route. Deliberately
+// does not require the collection to currently be within its active promotional window — this
+// is a "browse this collection's products" read, not the home-screen visibility surface that
+// listActiveCollections/getCollectionBySlug serve.
+export async function getCollectionIdBySlug(slug: string): Promise<string> {
+  const collection = await collectionsRepository.findCollectionBySlug(slug);
+  if (!collection) {
+    throw new NotFoundError('Collection not found');
+  }
+  return collection.id;
+}
+
 // Used by the home feature to compose getHomeSections() — returns active collections with
 // their active-product sets already embedded, matching what the storefront needs in one shot.
 export async function listActiveCollectionsWithProducts(): Promise<CollectionWithProducts[]> {
