@@ -132,14 +132,19 @@ const collectionSlugSchema = z
   .max(150)
   .regex(SLUG_PATTERN, 'Invalid slug format');
 
-export const createCollectionSchema = z.object({
-  name: z.string().trim().min(1).max(150),
-  slug: collectionSlugSchema.optional(),
-  description: z.string().trim().min(1).max(500).optional(),
-  startsAt: z.coerce.date().optional(),
-  endsAt: z.coerce.date().optional(),
-  productIds: z.array(z.string().uuid()).optional(),
-});
+export const createCollectionSchema = z
+  .object({
+    name: z.string().trim().min(1).max(150),
+    slug: collectionSlugSchema.optional(),
+    description: z.string().trim().min(1).max(500).optional(),
+    startsAt: z.coerce.date().optional(),
+    endsAt: z.coerce.date().optional(),
+    productIds: z.array(z.string().uuid()).optional(),
+  })
+  .refine((data) => !data.startsAt || !data.endsAt || data.endsAt > data.startsAt, {
+    message: 'endsAt must be after startsAt',
+    path: ['endsAt'],
+  });
 
 export const updateCollectionSchema = z.object({
   name: z.string().trim().min(1).max(150).optional(),

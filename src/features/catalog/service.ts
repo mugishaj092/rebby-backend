@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError } from '@/core/errors/AppError';
+import { ConflictError, NotFoundError, ValidationError } from '@/core/errors/AppError';
 import { slugify } from '@/core/utils/slugify';
 import { Prisma } from '@/generated/prisma/client';
 import type {
@@ -490,6 +490,15 @@ async function assertProductsExist(productIds: string[]): Promise<void> {
   }
 }
 
+// Shared by collections and banners. A schema-level refine can only catch an inverted window
+// when both dates arrive in the same request — it can't see a stored row, so a partial update
+// that only touches one of the two dates needs the merged (input ?? existing) values checked here.
+function assertDateOrder(startsAt: Date | null, endsAt: Date | null): void {
+  if (startsAt && endsAt && endsAt <= startsAt) {
+    throw new ValidationError('endsAt must be after startsAt');
+  }
+}
+
 // The pre-check (findCollectionBySlug) is check-then-act, not atomic — mirrors the same
 // TOCTOU guard already applied to category/product slugs.
 async function runWithCollectionConflictGuard<T>(operation: () => Promise<T>): Promise<T> {
@@ -545,6 +554,10 @@ export async function updateCollection(
   if (input.slug && input.slug !== collection.slug) {
     await assertCollectionSlugAvailable(input.slug);
   }
+
+  const startsAt = input.startsAt !== undefined ? input.startsAt : collection.startsAt;
+  const endsAt = input.endsAt !== undefined ? input.endsAt : collection.endsAt;
+  assertDateOrder(startsAt, endsAt);
 
   return runWithCollectionConflictGuard(() =>
     catalogRepository.updateCollection(id, {
@@ -625,6 +638,14 @@ async function assertBannerLinkValueResolves(linkType: string, linkValue: string
       }
       break;
     }
+    case 'url': {
+      try {
+        new URL(linkValue);
+      } catch {
+        throw new ValidationError('linkValue must be a valid URL when linkType is "url"');
+      }
+      break;
+    }
     default:
       break;
   }
@@ -660,6 +681,10 @@ export async function updateBanner(
   if (input.linkType !== undefined || input.linkValue !== undefined) {
     await assertBannerLinkValueResolves(linkType, linkValue);
   }
+
+  const startsAt = input.startsAt !== undefined ? input.startsAt : banner.startsAt;
+  const endsAt = input.endsAt !== undefined ? input.endsAt : banner.endsAt;
+  assertDateOrder(startsAt, endsAt);
 
   return catalogRepository.updateBanner(id, {
     ...(input.title !== undefined ? { title: input.title } : {}),

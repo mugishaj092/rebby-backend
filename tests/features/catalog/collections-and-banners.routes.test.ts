@@ -201,6 +201,54 @@ describe('features/catalog collections & banners routes', () => {
     });
   });
 
+  describe('collection date validation', () => {
+    it('rejects a collection with endsAt before startsAt', async () => {
+      const response = await createCollectionViaApi({
+        startsAt: new Date(Date.now() + 60_000).toISOString(),
+        endsAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+      expect(response.status).toBe(422);
+    });
+
+    it('rejects setting a collection’s endsAt before the existing (unchanged) startsAt', async () => {
+      const startsAt = new Date(Date.now() - ONE_DAY_MS).toISOString();
+      const collection = await createCollectionViaApi({ startsAt });
+
+      const response = await request(app)
+        .patch(`/api/v1/admin/collections/${collection.body.data.id}`)
+        .set('Authorization', `Bearer ${staffToken()}`)
+        .send({ endsAt: new Date(Date.now() - 2 * ONE_DAY_MS).toISOString() });
+
+      expect(response.status).toBe(422);
+    });
+
+    it('rejects setting a collection’s startsAt after the existing (unchanged) endsAt', async () => {
+      const endsAt = new Date(Date.now() + ONE_DAY_MS).toISOString();
+      const collection = await createCollectionViaApi({ endsAt });
+
+      const response = await request(app)
+        .patch(`/api/v1/admin/collections/${collection.body.data.id}`)
+        .set('Authorization', `Bearer ${staffToken()}`)
+        .send({ startsAt: new Date(Date.now() + 2 * ONE_DAY_MS).toISOString() });
+
+      expect(response.status).toBe(422);
+    });
+
+    it('rejects endsAt before startsAt when both are provided in the same collection update', async () => {
+      const collection = await createCollectionViaApi();
+
+      const response = await request(app)
+        .patch(`/api/v1/admin/collections/${collection.body.data.id}`)
+        .set('Authorization', `Bearer ${staffToken()}`)
+        .send({
+          startsAt: new Date(Date.now() + ONE_DAY_MS).toISOString(),
+          endsAt: new Date(Date.now() - ONE_DAY_MS).toISOString(),
+        });
+
+      expect(response.status).toBe(422);
+    });
+  });
+
   describe('access control', () => {
     it('read endpoints work unauthenticated', async () => {
       const listResponse = await request(app).get('/api/v1/collections');
@@ -301,6 +349,11 @@ describe('features/catalog collections & banners routes', () => {
         linkValue: randomUUID(),
       });
       expect(response.status).toBe(404);
+    });
+
+    it('rejects linkType url with a linkValue that is not a valid URL', async () => {
+      const response = await createBannerViaApi({ linkType: 'url', linkValue: 'not-a-url' });
+      expect(response.status).toBe(422);
     });
   });
 
@@ -435,6 +488,48 @@ describe('features/catalog collections & banners routes', () => {
     });
   });
 
+  describe('collection product listings exclude inactive/soft-deleted products', () => {
+    it('excludes a product that was soft-deleted after being added to a collection, from both the detail view and the home sections', async () => {
+      const productId = await createProduct();
+      const collection = await createCollectionViaApi({ productIds: [productId] });
+
+      await request(app)
+        .delete(`/api/v1/admin/products/${productId}`)
+        .set('Authorization', `Bearer ${staffToken(StaffRole.manager)}`);
+
+      const detailResponse = await request(app).get(
+        `/api/v1/collections/${collection.body.data.slug}`,
+      );
+      expect(detailResponse.status).toBe(200);
+      expect(detailResponse.body.data.products).toHaveLength(0);
+
+      const homeResponse = await request(app).get('/api/v1/home');
+      const collectionEntry = (
+        homeResponse.body.data.collections as { id: string; products: { id: string }[] }[]
+      ).find((c) => c.id === collection.body.data.id);
+      expect(collectionEntry?.products).toHaveLength(0);
+    });
+
+    it('excludes a product that was deactivated (isActive: false, not soft-deleted) after being added to a collection', async () => {
+      const productId = await createProduct();
+      const collection = await createCollectionViaApi({ productIds: [productId] });
+
+      await prisma.product.update({ where: { id: productId }, data: { isActive: false } });
+
+      const detailResponse = await request(app).get(
+        `/api/v1/collections/${collection.body.data.slug}`,
+      );
+      expect(detailResponse.status).toBe(200);
+      expect(detailResponse.body.data.products).toHaveLength(0);
+
+      const homeResponse = await request(app).get('/api/v1/home');
+      const collectionEntry = (
+        homeResponse.body.data.collections as { id: string; products: { id: string }[] }[]
+      ).find((c) => c.id === collection.body.data.id);
+      expect(collectionEntry?.products).toHaveLength(0);
+    });
+  });
+
   describe('collection update', () => {
     it('updates a collection name/description/isActive', async () => {
       const collection = await createCollectionViaApi();
@@ -556,6 +651,74 @@ describe('features/catalog collections & banners routes', () => {
         .send({ linkType: 'product', linkValue: randomUUID() });
 
       expect(response.status).toBe(404);
+    });
+
+    it('rejects updating linkValue to a non-URL string when the banner’s linkType is (or is being set to) url', async () => {
+      const banner = await createBannerViaApi({
+        linkType: 'url',
+        linkValue: 'https://example.com',
+      });
+
+      const response = await request(app)
+        .patch(`/api/v1/admin/banners/${banner.body.data.id}`)
+        .set('Authorization', `Bearer ${staffToken()}`)
+        .send({ linkValue: 'not-a-url' });
+
+      expect(response.status).toBe(422);
+    });
+
+    it('rejects setting endsAt before the existing (unchanged) startsAt', async () => {
+      const startsAt = new Date(Date.now() - ONE_DAY_MS).toISOString();
+      const banner = await createBannerViaApi({ startsAt });
+
+      const response = await request(app)
+        .patch(`/api/v1/admin/banners/${banner.body.data.id}`)
+        .set('Authorization', `Bearer ${staffToken()}`)
+        .send({ endsAt: new Date(Date.now() - 2 * ONE_DAY_MS).toISOString() });
+
+      expect(response.status).toBe(422);
+    });
+
+    it('rejects setting startsAt after the existing (unchanged) endsAt', async () => {
+      const endsAt = new Date(Date.now() + ONE_DAY_MS).toISOString();
+      const banner = await createBannerViaApi({ endsAt });
+
+      const response = await request(app)
+        .patch(`/api/v1/admin/banners/${banner.body.data.id}`)
+        .set('Authorization', `Bearer ${staffToken()}`)
+        .send({ startsAt: new Date(Date.now() + 2 * ONE_DAY_MS).toISOString() });
+
+      expect(response.status).toBe(422);
+    });
+
+    it('rejects endsAt before startsAt when both are provided in the same update', async () => {
+      const banner = await createBannerViaApi();
+
+      const response = await request(app)
+        .patch(`/api/v1/admin/banners/${banner.body.data.id}`)
+        .set('Authorization', `Bearer ${staffToken()}`)
+        .send({
+          startsAt: new Date(Date.now() + ONE_DAY_MS).toISOString(),
+          endsAt: new Date(Date.now() - ONE_DAY_MS).toISOString(),
+        });
+
+      expect(response.status).toBe(422);
+    });
+
+    it('allows updating linkValue when the stored linkType is an unrecognized value (forward-compat, e.g. legacy data)', async () => {
+      const banner = await createBannerViaApi();
+      await prisma.banner.update({
+        where: { id: banner.body.data.id },
+        data: { linkType: 'legacy-unknown-type' },
+      });
+
+      const response = await request(app)
+        .patch(`/api/v1/admin/banners/${banner.body.data.id}`)
+        .set('Authorization', `Bearer ${staffToken()}`)
+        .send({ linkValue: 'anything-goes' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.data.linkValue).toBe('anything-goes');
     });
 
     it('returns 404 deleting a nonexistent banner', async () => {

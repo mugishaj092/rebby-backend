@@ -283,6 +283,7 @@ export const catalogRepository = {
       },
       include: {
         products: {
+          where: { product: { isActive: true, deletedAt: null } },
           orderBy: { sortOrder: 'asc' },
           include: { product: true },
         },
@@ -303,6 +304,7 @@ export const catalogRepository = {
       orderBy: { createdAt: 'desc' },
       include: {
         products: {
+          where: { product: { isActive: true, deletedAt: null } },
           orderBy: { sortOrder: 'asc' },
           include: { product: true },
         },
