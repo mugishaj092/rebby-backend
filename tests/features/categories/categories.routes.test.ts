@@ -22,6 +22,13 @@ function uniqueSlugConflictError(): Prisma.PrismaClientKnownRequestError {
   );
 }
 
+function p2025Error(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'An operation failed because it depends on one or more records that were required but not found.',
+    { code: 'P2025', clientVersion: '7.8.0' },
+  );
+}
+
 function uniqueName(prefix = 'Category'): string {
   return `${prefix} ${randomUUID()}`;
 }
@@ -367,13 +374,16 @@ describe('features/categories routes', () => {
         .spyOn(categoriesRepository, 'findCategoryBySlug')
         .mockResolvedValue({ id: randomUUID() } as never);
 
-      const response = await request(app)
-        .post('/api/v1/admin/categories')
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send({ name: uniqueName('AlwaysCollides') });
+      try {
+        const response = await request(app)
+          .post('/api/v1/admin/categories')
+          .set('Authorization', `Bearer ${staffToken()}`)
+          .send({ name: uniqueName('AlwaysCollides') });
 
-      expect(response.status).toBe(409);
-      spy.mockRestore();
+        expect(response.status).toBe(409);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 
@@ -484,13 +494,53 @@ describe('features/categories routes', () => {
         return prisma.category.findUnique({ where: { id } });
       }) as never);
 
-      const response = await request(app)
-        .patch(`/api/v1/admin/categories/${outsider.body.data.id}`)
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send({ parentId: b.body.data.id });
+      try {
+        const response = await request(app)
+          .patch(`/api/v1/admin/categories/${outsider.body.data.id}`)
+          .set('Authorization', `Bearer ${staffToken()}`)
+          .send({ parentId: b.body.data.id });
 
-      expect(response.status).toBe(200);
-      spy.mockRestore();
+        expect(response.status).toBe(200);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
+  describe('race guard: concurrent delete between existence check and write', () => {
+    it('maps a P2025 on update to a clean 404 instead of an unhandled 500', async () => {
+      const created = await createCategoryViaApi();
+      const spy = vi
+        .spyOn(categoriesRepository, 'updateCategory')
+        .mockRejectedValueOnce(p2025Error());
+
+      try {
+        const response = await request(app)
+          .patch(`/api/v1/admin/categories/${created.body.data.id}`)
+          .set('Authorization', `Bearer ${staffToken()}`)
+          .send({ name: 'Whatever' });
+
+        expect(response.status).toBe(404);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('maps a P2025 on delete to a clean 404 instead of an unhandled 500', async () => {
+      const created = await createCategoryViaApi();
+      const spy = vi
+        .spyOn(categoriesRepository, 'deleteCategory')
+        .mockRejectedValueOnce(p2025Error());
+
+      try {
+        const response = await request(app)
+          .delete(`/api/v1/admin/categories/${created.body.data.id}`)
+          .set('Authorization', `Bearer ${staffToken(StaffRole.manager)}`);
+
+        expect(response.status).toBe(404);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 

@@ -1,6 +1,7 @@
 import * as productsService from '@/features/products/service';
 import { ConflictError, NotFoundError } from '@/core/errors/AppError';
 import { conflictFieldsFromError } from '@/core/errors/prismaConflict';
+import { withNotFoundOnP2025 } from '@/core/errors/prismaRaceGuard';
 import { Prisma } from '@/generated/prisma/client';
 import type { ProductVariant } from '@/generated/prisma/client';
 
@@ -79,16 +80,20 @@ export async function updateVariant(
     }
   }
 
-  return runWithConflictGuard(() =>
-    variantsRepository.updateVariant(variantId, {
-      ...(input.size !== undefined ? { size: input.size } : {}),
-      ...(input.color !== undefined ? { color: input.color } : {}),
-      ...(input.sku !== undefined ? { sku: input.sku } : {}),
-      ...(input.priceOverride !== undefined
-        ? { priceOverride: new Prisma.Decimal(input.priceOverride) }
-        : {}),
-      ...(input.stock !== undefined ? { stock: input.stock } : {}),
-    }),
+  return withNotFoundOnP2025(
+    () =>
+      runWithConflictGuard(() =>
+        variantsRepository.updateVariant(variantId, {
+          ...(input.size !== undefined ? { size: input.size } : {}),
+          ...(input.color !== undefined ? { color: input.color } : {}),
+          ...(input.sku !== undefined ? { sku: input.sku } : {}),
+          ...(input.priceOverride !== undefined
+            ? { priceOverride: new Prisma.Decimal(input.priceOverride) }
+            : {}),
+          ...(input.stock !== undefined ? { stock: input.stock } : {}),
+        }),
+      ),
+    'Variant not found',
   );
 }
 
@@ -98,5 +103,5 @@ export async function removeVariant(_staffId: string, variantId: string): Promis
     throw new NotFoundError('Variant not found');
   }
 
-  await variantsRepository.removeVariant(variantId);
+  await withNotFoundOnP2025(() => variantsRepository.removeVariant(variantId), 'Variant not found');
 }

@@ -29,6 +29,13 @@ function uniqueConflictError(): Prisma.PrismaClientKnownRequestError {
   });
 }
 
+function p2025Error(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'An operation failed because it depends on one or more records that were required but not found.',
+    { code: 'P2025', clientVersion: '7.8.0' },
+  );
+}
+
 function uniqueName(prefix = 'Collection'): string {
   return `${prefix} ${randomUUID()}`;
 }
@@ -165,6 +172,39 @@ describe('features/collections routes', () => {
         .send({ productIds: [] });
 
       expect(response.status).toBe(404);
+    });
+
+    it('dedupes a repeated productId on create instead of raising a raw conflict error', async () => {
+      const p1 = await createProduct();
+
+      const response = await createCollectionViaApi({ productIds: [p1, p1, p1] });
+
+      expect(response.status).toBe(201);
+
+      const rows = await prisma.collectionProduct.findMany({
+        where: { collectionId: response.body.data.id },
+      });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.productId).toBe(p1);
+    });
+
+    it('dedupes a repeated productId on PUT .../products instead of raising a raw conflict error', async () => {
+      const p1 = await createProduct();
+      const p2 = await createProduct();
+      const collection = await createCollectionViaApi();
+
+      const response = await request(app)
+        .put(`/api/v1/admin/collections/${collection.body.data.id}/products`)
+        .set('Authorization', `Bearer ${staffToken()}`)
+        .send({ productIds: [p1, p2, p1] });
+
+      expect(response.status).toBe(200);
+
+      const rows = await prisma.collectionProduct.findMany({
+        where: { collectionId: collection.body.data.id },
+      });
+      expect(rows).toHaveLength(2);
+      expect(rows.map((row) => row.productId).sort()).toEqual([p1, p2].sort());
     });
   });
 
@@ -407,12 +447,15 @@ describe('features/collections routes', () => {
         .spyOn(collectionsRepository, 'findCollectionBySlug')
         .mockResolvedValue({ id: randomUUID() } as never);
 
-      const response = await createCollectionViaApi({
-        name: uniqueName('AlwaysCollidesCollection'),
-      });
+      try {
+        const response = await createCollectionViaApi({
+          name: uniqueName('AlwaysCollidesCollection'),
+        });
 
-      expect(response.status).toBe(409);
-      spy.mockRestore();
+        expect(response.status).toBe(409);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 
@@ -466,6 +509,43 @@ describe('features/collections routes', () => {
 
       expect(response.status).toBe(500);
       spy.mockRestore();
+    });
+  });
+
+  describe('race guard: concurrent delete between existence check and write', () => {
+    it('maps a P2025 on update to a clean 404 instead of an unhandled 500', async () => {
+      const collection = await createCollectionViaApi();
+      const spy = vi
+        .spyOn(collectionsRepository, 'updateCollection')
+        .mockRejectedValueOnce(p2025Error());
+
+      try {
+        const response = await request(app)
+          .patch(`/api/v1/admin/collections/${collection.body.data.id}`)
+          .set('Authorization', `Bearer ${staffToken()}`)
+          .send({ name: 'Whatever' });
+
+        expect(response.status).toBe(404);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('maps a P2025 on delete to a clean 404 instead of an unhandled 500', async () => {
+      const collection = await createCollectionViaApi();
+      const spy = vi
+        .spyOn(collectionsRepository, 'deleteCollection')
+        .mockRejectedValueOnce(p2025Error());
+
+      try {
+        const response = await request(app)
+          .delete(`/api/v1/admin/collections/${collection.body.data.id}`)
+          .set('Authorization', `Bearer ${staffToken(StaffRole.manager)}`);
+
+        expect(response.status).toBe(404);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });

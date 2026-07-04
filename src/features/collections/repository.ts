@@ -38,11 +38,15 @@ export const collectionsRepository = {
     return prisma.collection.findUnique({ where: { slug } });
   },
 
+  // Deduped before the write — CollectionProduct's compound primary key is
+  // (collectionId, productId), so a duplicate id in the same createMany batch would otherwise
+  // raise a raw P2002 instead of a clean result. First occurrence wins for sortOrder.
   setCollectionProducts(collectionId: string, productIds: string[]) {
+    const uniqueIds = Array.from(new Set(productIds));
     return prisma.$transaction([
       prisma.collectionProduct.deleteMany({ where: { collectionId } }),
       prisma.collectionProduct.createMany({
-        data: productIds.map((productId, index) => ({
+        data: uniqueIds.map((productId, index) => ({
           collectionId,
           productId,
           sortOrder: index,

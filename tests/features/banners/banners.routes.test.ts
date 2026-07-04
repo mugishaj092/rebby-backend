@@ -7,7 +7,15 @@ import { createApp } from '@/app';
 import { signAccessToken } from '@/core/security/jwt';
 import { prisma } from '@/db/prisma';
 import { bannersRepository } from '@/features/banners/repository';
+import { Prisma } from '@/generated/prisma/client';
 import { StaffRole } from '@/generated/prisma/enums';
+
+function p2025Error(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'An operation failed because it depends on one or more records that were required but not found.',
+    { code: 'P2025', clientVersion: '7.8.0' },
+  );
+}
 
 function uniqueName(prefix = 'Banner'): string {
   return `${prefix} ${randomUUID()}`;
@@ -353,6 +361,39 @@ describe('features/banners routes', () => {
         .delete(`/api/v1/admin/banners/${randomUUID()}`)
         .set('Authorization', `Bearer ${staffToken(StaffRole.manager)}`);
       expect(response.status).toBe(404);
+    });
+  });
+
+  describe('race guard: concurrent delete between existence check and write', () => {
+    it('maps a P2025 on update to a clean 404 instead of an unhandled 500', async () => {
+      const banner = await createBannerViaApi();
+      const spy = vi.spyOn(bannersRepository, 'updateBanner').mockRejectedValueOnce(p2025Error());
+
+      try {
+        const response = await request(app)
+          .patch(`/api/v1/admin/banners/${banner.body.data.id}`)
+          .set('Authorization', `Bearer ${staffToken()}`)
+          .send({ title: 'Whatever' });
+
+        expect(response.status).toBe(404);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('maps a P2025 on delete to a clean 404 instead of an unhandled 500', async () => {
+      const banner = await createBannerViaApi();
+      const spy = vi.spyOn(bannersRepository, 'deleteBanner').mockRejectedValueOnce(p2025Error());
+
+      try {
+        const response = await request(app)
+          .delete(`/api/v1/admin/banners/${banner.body.data.id}`)
+          .set('Authorization', `Bearer ${staffToken(StaffRole.manager)}`);
+
+        expect(response.status).toBe(404);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 

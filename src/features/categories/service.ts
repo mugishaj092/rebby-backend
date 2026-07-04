@@ -1,4 +1,5 @@
 import { ConflictError, NotFoundError } from '@/core/errors/AppError';
+import { withNotFoundOnP2025 } from '@/core/errors/prismaRaceGuard';
 import { slugify } from '@/core/utils/slugify';
 import { Prisma } from '@/generated/prisma/client';
 import type { Category } from '@/generated/prisma/client';
@@ -120,14 +121,18 @@ export async function updateCategory(
     await assertSlugAvailable(input.slug);
   }
 
-  return runWithSlugConflictGuard(() =>
-    categoriesRepository.updateCategory(id, {
-      ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.slug !== undefined ? { slug: input.slug } : {}),
-      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
-      ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
-      ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
-    }),
+  return withNotFoundOnP2025(
+    () =>
+      runWithSlugConflictGuard(() =>
+        categoriesRepository.updateCategory(id, {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.slug !== undefined ? { slug: input.slug } : {}),
+          ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+          ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
+          ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+        }),
+      ),
+    'Category not found',
   );
 }
 
@@ -147,7 +152,7 @@ export async function deleteCategory(_staffId: string, id: string): Promise<void
     throw new ConflictError('Cannot delete a category that has active products');
   }
 
-  await categoriesRepository.deleteCategory(id);
+  await withNotFoundOnP2025(() => categoriesRepository.deleteCategory(id), 'Category not found');
 }
 
 export async function getCategory(id: string): Promise<Category> {

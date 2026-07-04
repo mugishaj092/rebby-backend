@@ -25,6 +25,13 @@ function uniqueConflictError(fields: string[]): Prisma.PrismaClientKnownRequestE
   });
 }
 
+function p2025Error(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'An operation failed because it depends on one or more records that were required but not found.',
+    { code: 'P2025', clientVersion: '7.8.0' },
+  );
+}
+
 function uniqueName(prefix = 'Product'): string {
   return `${prefix} ${randomUUID()}`;
 }
@@ -315,6 +322,41 @@ describe('features/variants routes', () => {
 
       expect(response.status).toBe(409);
       spy.mockRestore();
+    });
+  });
+
+  describe('race guard: concurrent delete between existence check and write', () => {
+    it('maps a P2025 on updateVariant to a clean 404 instead of an unhandled 500', async () => {
+      const product = await createProductViaApi();
+      const variantId = product.body.data.variants[0].id;
+      const spy = vi.spyOn(variantsRepository, 'updateVariant').mockRejectedValueOnce(p2025Error());
+
+      try {
+        const response = await request(app)
+          .patch(`/api/v1/admin/variants/${variantId}`)
+          .set('Authorization', `Bearer ${staffToken()}`)
+          .send({ stock: 3 });
+
+        expect(response.status).toBe(404);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('maps a P2025 on removeVariant to a clean 404 instead of an unhandled 500', async () => {
+      const product = await createProductViaApi();
+      const variantId = product.body.data.variants[0].id;
+      const spy = vi.spyOn(variantsRepository, 'removeVariant').mockRejectedValueOnce(p2025Error());
+
+      try {
+        const response = await request(app)
+          .delete(`/api/v1/admin/variants/${variantId}`)
+          .set('Authorization', `Bearer ${staffToken(StaffRole.manager)}`);
+
+        expect(response.status).toBe(404);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });

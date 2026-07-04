@@ -1,6 +1,7 @@
 import * as categoriesService from '@/features/categories/service';
 import { ConflictError, NotFoundError } from '@/core/errors/AppError';
 import { conflictFieldsFromError } from '@/core/errors/prismaConflict';
+import { withNotFoundOnP2025 } from '@/core/errors/prismaRaceGuard';
 import { slugify } from '@/core/utils/slugify';
 import { Prisma } from '@/generated/prisma/client';
 import type { Product, ProductVariant } from '@/generated/prisma/client';
@@ -142,19 +143,27 @@ export async function updateProduct(
     await assertProductSlugAvailable(input.slug);
   }
 
-  return runWithConflictGuard(() =>
-    productsRepository.updateProduct(id, {
-      ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.slug !== undefined ? { slug: input.slug } : {}),
-      ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
-      ...(input.description !== undefined ? { description: input.description } : {}),
-      ...(input.fabric !== undefined ? { fabric: input.fabric } : {}),
-      ...(input.careInstructions !== undefined ? { careInstructions: input.careInstructions } : {}),
-      ...(input.basePrice !== undefined ? { basePrice: new Prisma.Decimal(input.basePrice) } : {}),
-      ...(input.compareAtPrice !== undefined
-        ? { compareAtPrice: new Prisma.Decimal(input.compareAtPrice) }
-        : {}),
-    }),
+  return withNotFoundOnP2025(
+    () =>
+      runWithConflictGuard(() =>
+        productsRepository.updateProduct(id, {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.slug !== undefined ? { slug: input.slug } : {}),
+          ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.fabric !== undefined ? { fabric: input.fabric } : {}),
+          ...(input.careInstructions !== undefined
+            ? { careInstructions: input.careInstructions }
+            : {}),
+          ...(input.basePrice !== undefined
+            ? { basePrice: new Prisma.Decimal(input.basePrice) }
+            : {}),
+          ...(input.compareAtPrice !== undefined
+            ? { compareAtPrice: new Prisma.Decimal(input.compareAtPrice) }
+            : {}),
+        }),
+      ),
+    'Product not found',
   );
 }
 
@@ -164,7 +173,7 @@ export async function deleteProduct(_staffId: string, id: string): Promise<void>
     throw new NotFoundError('Product not found');
   }
 
-  await productsRepository.softDeleteProduct(id);
+  await withNotFoundOnP2025(() => productsRepository.softDeleteProduct(id), 'Product not found');
 }
 
 // ---- Cross-feature reads (variants, collections, banners) ------

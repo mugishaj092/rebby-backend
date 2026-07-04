@@ -2,6 +2,7 @@ import * as categoriesService from '@/features/categories/service';
 import * as collectionsService from '@/features/collections/service';
 import * as productsService from '@/features/products/service';
 import { NotFoundError, ValidationError } from '@/core/errors/AppError';
+import { withNotFoundOnP2025 } from '@/core/errors/prismaRaceGuard';
 import { assertDateOrder } from '@/core/validation/dateOrder';
 import type { Banner } from '@/generated/prisma/client';
 
@@ -76,17 +77,21 @@ export async function updateBanner(
   const endsAt = input.endsAt !== undefined ? input.endsAt : banner.endsAt;
   assertDateOrder(startsAt, endsAt);
 
-  return bannersRepository.updateBanner(id, {
-    ...(input.title !== undefined ? { title: input.title } : {}),
-    ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
-    ...(input.linkType !== undefined ? { linkType: input.linkType } : {}),
-    ...(input.linkValue !== undefined ? { linkValue: input.linkValue } : {}),
-    ...(input.placement !== undefined ? { placement: input.placement } : {}),
-    ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
-    ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
-    ...(input.startsAt !== undefined ? { startsAt: input.startsAt } : {}),
-    ...(input.endsAt !== undefined ? { endsAt: input.endsAt } : {}),
-  });
+  return withNotFoundOnP2025(
+    () =>
+      bannersRepository.updateBanner(id, {
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
+        ...(input.linkType !== undefined ? { linkType: input.linkType } : {}),
+        ...(input.linkValue !== undefined ? { linkValue: input.linkValue } : {}),
+        ...(input.placement !== undefined ? { placement: input.placement } : {}),
+        ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+        ...(input.startsAt !== undefined ? { startsAt: input.startsAt } : {}),
+        ...(input.endsAt !== undefined ? { endsAt: input.endsAt } : {}),
+      }),
+    'Banner not found',
+  );
 }
 
 export async function deleteBanner(_staffId: string, id: string): Promise<void> {
@@ -95,7 +100,7 @@ export async function deleteBanner(_staffId: string, id: string): Promise<void> 
     throw new NotFoundError('Banner not found');
   }
 
-  await bannersRepository.deleteBanner(id);
+  await withNotFoundOnP2025(() => bannersRepository.deleteBanner(id), 'Banner not found');
 }
 
 // Used by the home feature to compose getHomeSections().

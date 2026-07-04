@@ -1,5 +1,6 @@
 import * as productsService from '@/features/products/service';
 import { ConflictError, NotFoundError } from '@/core/errors/AppError';
+import { withNotFoundOnP2025 } from '@/core/errors/prismaRaceGuard';
 import { assertDateOrder } from '@/core/validation/dateOrder';
 import { slugify } from '@/core/utils/slugify';
 import { Prisma } from '@/generated/prisma/client';
@@ -105,15 +106,19 @@ export async function updateCollection(
   const endsAt = input.endsAt !== undefined ? input.endsAt : collection.endsAt;
   assertDateOrder(startsAt, endsAt);
 
-  return runWithCollectionConflictGuard(() =>
-    collectionsRepository.updateCollection(id, {
-      ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.slug !== undefined ? { slug: input.slug } : {}),
-      ...(input.description !== undefined ? { description: input.description } : {}),
-      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
-      ...(input.startsAt !== undefined ? { startsAt: input.startsAt } : {}),
-      ...(input.endsAt !== undefined ? { endsAt: input.endsAt } : {}),
-    }),
+  return withNotFoundOnP2025(
+    () =>
+      runWithCollectionConflictGuard(() =>
+        collectionsRepository.updateCollection(id, {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.slug !== undefined ? { slug: input.slug } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+          ...(input.startsAt !== undefined ? { startsAt: input.startsAt } : {}),
+          ...(input.endsAt !== undefined ? { endsAt: input.endsAt } : {}),
+        }),
+      ),
+    'Collection not found',
   );
 }
 
@@ -123,7 +128,10 @@ export async function deleteCollection(_staffId: string, id: string): Promise<vo
     throw new NotFoundError('Collection not found');
   }
 
-  await collectionsRepository.deleteCollection(id);
+  await withNotFoundOnP2025(
+    () => collectionsRepository.deleteCollection(id),
+    'Collection not found',
+  );
 }
 
 export async function updateCollectionProducts(
