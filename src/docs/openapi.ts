@@ -125,6 +125,148 @@ const categoryIdParam = {
   schema: { type: 'string', format: 'uuid' },
 };
 
+const productIdParam = {
+  name: 'id',
+  in: 'path' as const,
+  required: true,
+  description: 'Product id',
+  schema: { type: 'string', format: 'uuid' },
+};
+
+const variantIdParam = {
+  name: 'id',
+  in: 'path' as const,
+  required: true,
+  description: 'Variant id',
+  schema: { type: 'string', format: 'uuid' },
+};
+
+const moneyStringSchema = (example: string) => ({
+  type: 'string',
+  description: 'Positive decimal string with up to 2 decimal places, e.g. "19.99".',
+  pattern: '^\\d+(\\.\\d{1,2})?$',
+  example,
+});
+
+const productNotFoundResponse = {
+  description: 'No product with that id',
+  content: { 'application/json': { schema: errorEnvelope('NOT_FOUND', 'Product not found') } },
+};
+
+const variantNotFoundResponse = {
+  description: 'No variant with that id',
+  content: { 'application/json': { schema: errorEnvelope('NOT_FOUND', 'Variant not found') } },
+};
+
+const variantWriteProperties = (requiredStock: boolean) => ({
+  size: { type: 'string', maxLength: 20, example: 'M' },
+  color: { type: 'string', maxLength: 50, example: 'Black' },
+  sku: { type: 'string', maxLength: 100, example: 'TSHIRT-BLK-M' },
+  priceOverride: moneyStringSchema('17.50'),
+  stock: { type: 'integer', minimum: 0, ...(requiredStock ? {} : {}), example: 25 },
+});
+
+const createProductRequestBody = {
+  required: true,
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        required: ['name', 'basePrice', 'variants'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 191, example: 'Cotton T-Shirt' },
+          slug: {
+            type: 'string',
+            description:
+              'Optional — auto-generated from name (with a numeric suffix on collision) if omitted.',
+            example: 'cotton-t-shirt',
+          },
+          categoryId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Must reference an existing category.',
+          },
+          description: { type: 'string' },
+          fabric: { type: 'string', maxLength: 255 },
+          careInstructions: { type: 'string', maxLength: 500 },
+          basePrice: moneyStringSchema('19.99'),
+          compareAtPrice: moneyStringSchema('24.99'),
+          images: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['url'],
+              properties: {
+                url: { type: 'string', format: 'uri', maxLength: 500 },
+                sortOrder: { type: 'integer', default: 0 },
+                isPrimary: { type: 'boolean', default: false },
+              },
+            },
+          },
+          variants: {
+            type: 'array',
+            minItems: 1,
+            description: 'At least one variant is required.',
+            items: {
+              type: 'object',
+              required: ['size', 'color', 'sku', 'stock'],
+              properties: variantWriteProperties(true),
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+const updateProductRequestBody = {
+  required: true,
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        description: 'All fields optional — product-level fields only (not images/variants).',
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 191 },
+          slug: { type: 'string' },
+          categoryId: { type: 'string', format: 'uuid' },
+          description: { type: 'string' },
+          fabric: { type: 'string', maxLength: 255 },
+          careInstructions: { type: 'string', maxLength: 500 },
+          basePrice: moneyStringSchema('19.99'),
+          compareAtPrice: moneyStringSchema('24.99'),
+        },
+      },
+    },
+  },
+};
+
+const addVariantRequestBody = {
+  required: true,
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        required: ['size', 'color', 'sku', 'stock'],
+        properties: variantWriteProperties(true),
+      },
+    },
+  },
+};
+
+const updateVariantRequestBody = {
+  required: true,
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        description: 'All fields optional, including stock (see summary/description below).',
+        properties: variantWriteProperties(false),
+      },
+    },
+  },
+};
+
 const categoryWriteRequestBody = (requiredName: boolean) => ({
   required: true,
   content: {
@@ -175,7 +317,7 @@ export const openApiDocument: JsonObject = {
     title: 'REBY API (dev — auth + catalog foundation)',
     version: '0.1.0-dev',
     description:
-      'Hand-written, throwaway OpenAPI doc covering specs 05–06 (health check, self-hosted JWT auth, the temporary /_debug/* routes, and Categories). Superseded by the real generated spec in spec 35; not for production use. Customer refresh/logout accept the refresh token via cookie (browser) or request body (React Native/Expo — no persistent cookie jar); staff refresh/logout are cookie-only. Use "Try it out" for login first (in the same browser session) so the cookie is present, or pass refreshToken from the login/register response body directly.',
+      'Hand-written, throwaway OpenAPI doc covering specs 05–07 (health check, self-hosted JWT auth, the temporary /_debug/* routes, Categories, and Products & Variants). Superseded by the real generated spec in spec 35; not for production use. Customer refresh/logout accept the refresh token via cookie (browser) or request body (React Native/Expo — no persistent cookie jar); staff refresh/logout are cookie-only. Use "Try it out" for login first (in the same browser session) so the cookie is present, or pass refreshToken from the login/register response body directly.',
   },
   paths: {
     '/health': {
@@ -627,6 +769,179 @@ export const openApiDocument: JsonObject = {
         },
       },
     },
+    '/api/v1/admin/products': {
+      post: {
+        summary: 'Create a product with its variants and images in one call (STAFF+)',
+        description:
+          'A single nested write — the product, all variants, and all images are created atomically. Duplicate SKUs within the request, or against an existing variant, are rejected before any write.',
+        tags: ['Catalog — Products (admin)'],
+        security: [{ bearerAuth: [] }],
+        requestBody: createProductRequestBody,
+        responses: {
+          '201': {
+            description: 'Created',
+            content: {
+              'application/json': {
+                schema: successEnvelope({ $ref: '#/components/schemas/ProductWithRelations' }),
+              },
+            },
+          },
+          '404': {
+            description: 'categoryId does not reference an existing category',
+            content: { 'application/json': { schema: errorEnvelope('NOT_FOUND', 'Category not found') } },
+          },
+          '409': {
+            description:
+              'Duplicate SKU in the request payload, SKU already exists on another variant, or a duplicate product slug',
+            content: {
+              'application/json': {
+                schema: errorEnvelope('CONFLICT', 'SKU already exists: TSHIRT-BLK-M'),
+              },
+            },
+          },
+          '422': validationFailedResponse,
+          ...staffAuthResponses,
+        },
+      },
+    },
+    '/api/v1/admin/products/{id}': {
+      patch: {
+        summary: 'Update product-level fields (STAFF+)',
+        description: 'Variants and images are managed separately, via their own routes.',
+        tags: ['Catalog — Products (admin)'],
+        security: [{ bearerAuth: [] }],
+        parameters: [productIdParam],
+        requestBody: updateProductRequestBody,
+        responses: {
+          '200': {
+            description: 'Updated',
+            content: {
+              'application/json': {
+                schema: successEnvelope({ $ref: '#/components/schemas/Product' }),
+              },
+            },
+          },
+          '404': productNotFoundResponse,
+          '409': {
+            description: 'Duplicate product slug',
+            content: {
+              'application/json': {
+                schema: errorEnvelope('CONFLICT', 'A product with this slug already exists'),
+              },
+            },
+          },
+          '422': validationFailedResponse,
+          ...staffAuthResponses,
+        },
+      },
+      delete: {
+        summary: 'Soft-delete a product (MANAGER+)',
+        description:
+          'Sets deletedAt and isActive: false; the row is kept (not removed) so past OrderItems still resolve against it.',
+        tags: ['Catalog — Products (admin)'],
+        security: [{ bearerAuth: [] }],
+        parameters: [productIdParam],
+        responses: {
+          '200': {
+            description: 'Deleted',
+            content: {
+              'application/json': {
+                schema: successEnvelope({
+                  type: 'object',
+                  properties: { deleted: { type: 'boolean', example: true } },
+                }),
+              },
+            },
+          },
+          '404': productNotFoundResponse,
+          ...staffAuthResponses,
+        },
+      },
+    },
+    '/api/v1/admin/products/{id}/variants': {
+      post: {
+        summary: 'Add a variant to an existing product (STAFF+)',
+        tags: ['Catalog — Products (admin)'],
+        security: [{ bearerAuth: [] }],
+        parameters: [productIdParam],
+        requestBody: addVariantRequestBody,
+        responses: {
+          '201': {
+            description: 'Created',
+            content: {
+              'application/json': {
+                schema: successEnvelope({ $ref: '#/components/schemas/ProductVariant' }),
+              },
+            },
+          },
+          '404': productNotFoundResponse,
+          '409': {
+            description:
+              'SKU already exists, or this product already has a variant with this size/color combination',
+            content: {
+              'application/json': {
+                schema: errorEnvelope('CONFLICT', 'SKU already exists: TSHIRT-BLK-M'),
+              },
+            },
+          },
+          '422': validationFailedResponse,
+          ...staffAuthResponses,
+        },
+      },
+    },
+    '/api/v1/admin/variants/{id}': {
+      patch: {
+        summary: 'Update a variant, including a direct stock correction (STAFF+)',
+        description:
+          'All fields optional. Allowed to write `stock` directly — this is the one narrow, documented exception to the "stock only changes through the inventory choke point" rule (Spec 17): administrative stock correction (e.g. a manual recount), never order fulfillment.',
+        tags: ['Catalog — Variants (admin)'],
+        security: [{ bearerAuth: [] }],
+        parameters: [variantIdParam],
+        requestBody: updateVariantRequestBody,
+        responses: {
+          '200': {
+            description: 'Updated',
+            content: {
+              'application/json': {
+                schema: successEnvelope({ $ref: '#/components/schemas/ProductVariant' }),
+              },
+            },
+          },
+          '404': variantNotFoundResponse,
+          '409': {
+            description: 'SKU already exists on another variant',
+            content: {
+              'application/json': {
+                schema: errorEnvelope('CONFLICT', 'SKU already exists: TSHIRT-BLK-M'),
+              },
+            },
+          },
+          '422': validationFailedResponse,
+          ...staffAuthResponses,
+        },
+      },
+      delete: {
+        summary: 'Remove a variant (MANAGER+)',
+        tags: ['Catalog — Variants (admin)'],
+        security: [{ bearerAuth: [] }],
+        parameters: [variantIdParam],
+        responses: {
+          '200': {
+            description: 'Deleted',
+            content: {
+              'application/json': {
+                schema: successEnvelope({
+                  type: 'object',
+                  properties: { deleted: { type: 'boolean', example: true } },
+                }),
+              },
+            },
+          },
+          '404': variantNotFoundResponse,
+          ...staffAuthResponses,
+        },
+      },
+    },
     '/api/v1/_debug/whoami': {
       get: {
         summary: '[throwaway] Echo the authenticated customer',
@@ -746,6 +1061,64 @@ export const openApiDocument: JsonObject = {
           email: { type: 'string', format: 'email' },
           role: { type: 'string', enum: ['staff', 'manager', 'owner'] },
         },
+      },
+      Product: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          categoryId: { type: 'string', format: 'uuid', nullable: true },
+          name: { type: 'string' },
+          slug: { type: 'string' },
+          description: { type: 'string', nullable: true },
+          fabric: { type: 'string', nullable: true },
+          careInstructions: { type: 'string', nullable: true },
+          basePrice: { type: 'string', description: 'Decimal serialized as a string, e.g. "19.99".' },
+          compareAtPrice: { type: 'string', nullable: true },
+          isActive: { type: 'boolean' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+          deletedAt: { type: 'string', format: 'date-time', nullable: true },
+        },
+      },
+      ProductImage: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          productId: { type: 'string', format: 'uuid' },
+          url: { type: 'string', format: 'uri' },
+          sortOrder: { type: 'integer' },
+          isPrimary: { type: 'boolean' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      ProductVariant: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          productId: { type: 'string', format: 'uuid' },
+          size: { type: 'string' },
+          color: { type: 'string' },
+          sku: { type: 'string' },
+          priceOverride: { type: 'string', nullable: true },
+          stock: { type: 'integer' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      ProductWithRelations: {
+        allOf: [
+          { $ref: '#/components/schemas/Product' },
+          {
+            type: 'object',
+            properties: {
+              images: { type: 'array', items: { $ref: '#/components/schemas/ProductImage' } },
+              variants: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/ProductVariant' },
+              },
+            },
+          },
+        ],
       },
     },
   },
