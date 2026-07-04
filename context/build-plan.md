@@ -34,16 +34,18 @@ Set up the Express app: `app.ts` (app factory, middleware registration), `server
 ## Phase 2 — Catalog
 
 ### 06 Categories
-`features/catalog/` — `Category` model (self-referencing `parentId`), CRUD (staff-only for writes, public for reads), migration.
+`features/categories/` — `Category` model (self-referencing `parentId`), CRUD (staff-only for writes, public for reads), migration.
 **Verify:** nested categories creatable; public read works without auth; write requires staff.
 
 ### 07 Products & Variants
-`Product`, `ProductImage`, `ProductVariant` models + migration. Staff CRUD for products with nested variant creation (size/color/stock/optional price override).
+`Product`, `ProductImage` in `features/products/`; `ProductVariant` in its own `features/variants/` (every route nested under a product id, but not owned by `products`) + migration. Staff CRUD for products with nested variant creation (size/color/stock/optional price override).
 **Verify:** create a product with 3 variants in one call; duplicate SKU rejected; soft-delete hides from public listing but preserves for existing orders.
 
 ### 08 Collections & Banners
-`Collection`, `Banner` models + migration + staff CRUD + public read endpoints (home screen sections).
+`Collection` in `features/collections/`, `Banner` in `features/banners/` + migration + staff CRUD + public read endpoints (home screen sections composed by `features/home/`, which owns no data of its own).
 **Verify:** a collection can reference a set of products; banners have an active date range and only active ones return from the public endpoint.
+
+**Folder-structure note (post-08):** specs 06–08 originally built these under one shared `features/catalog/` folder; a later session split it into six single-responsibility features (`categories`, `products`, `variants`, `collections`, `banners`, `home`) at developer request. See `progress-tracker.md`'s Decisions log for the full rationale and the resulting cross-feature dependency graph.
 
 ### 09 Product Detail & Public Listing
 Public endpoints: list products (paginated), get product detail (with images, variants, category), list by category/collection.

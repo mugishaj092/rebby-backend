@@ -54,9 +54,14 @@ src/
       jwt.ts                # signAccessToken/verifyAccessToken, generateRefreshToken/hashRefreshToken
     errors/
       AppError.ts          # base + typed errors (NotFoundError, InsufficientStock, ...)
+      prismaConflict.ts    # conflictFieldsFromError(...) — shared P2002 field-extraction
     utils/
     validation/
       pagination.ts        # shared Zod schemas
+      slug.ts               # slugSchema(maxLength) — categories/products/collections
+      money.ts              # moneySchema — products/variants
+      idParams.ts           # idParamsSchema — every feature's `{ id: uuid }` route param
+      dateOrder.ts          # assertDateOrder(startsAt, endsAt) — collections/banners
 
   db/
     prisma.ts              # PrismaClient singleton
@@ -71,13 +76,45 @@ src/
       cookies.ts             # httpOnly refresh-token cookie config (separate customer/staff cookies)
       index.ts
 
-    catalog/                # categories, collections, products, variants, banners
+    categories/
       routes.ts
       controller.ts
       service.ts
       repository.ts
       schema.ts
-      index.ts
+
+    products/                # Product + ProductImage (variants live in their own feature)
+      routes.ts
+      controller.ts
+      service.ts
+      repository.ts
+      schema.ts
+
+    variants/                # ProductVariant — sizes/colors/SKU/stock; every route is
+      routes.ts               # nested under a product id, but owned here, not in products/
+      controller.ts
+      service.ts
+      repository.ts
+      schema.ts
+
+    collections/
+      routes.ts
+      controller.ts
+      service.ts
+      repository.ts
+      schema.ts
+
+    banners/
+      routes.ts
+      controller.ts
+      service.ts
+      repository.ts
+      schema.ts
+
+    home/                    # service-only composition of collections + banners for the
+      routes.ts               # single GET /api/v1/home read path — owns no data itself
+      controller.ts
+      service.ts
 
     discovery/               # search, filters, sort, recently viewed
       routes.ts
@@ -161,7 +198,12 @@ prisma/
 tests/
   setup.ts
   features/                    # tests mirror the feature folders
-    catalog/
+    categories/
+    products/
+    variants/
+    collections/
+    banners/
+    home/
     orders/
     payments/
     ...
@@ -177,7 +219,9 @@ tsconfig.json
 - **`core/` and `db/` are NOT features.** They hold genuinely shared, cross-cutting code (middleware, error types, the Prisma client, shared validation). If something is used by two or more features, it belongs here; if it's used by one, it stays in that feature.
 - **`inventory/` is a service-only internal feature** — it has no routes of its own. It exists purely so stock logic has one home and one owner, callable from `orders` (and later `admin`) via its service.
 - **Cross-feature calls go through the service layer only.** `orders/service.ts` may import `inventory.service.commitOrderStock`. It must NOT import `inventory`'s repository directly. Features talk to each other through services, never by reaching into another feature's internals.
-- **No circular dependencies.** Direction flows roughly: `orders`/`payments` → `inventory` → `catalog` → `core`. If two features need each other both ways, the shared piece moves to `core/`.
+- **No circular dependencies.** Broad direction: `orders`/`payments` → `inventory` → (`variants`/`collections`/`banners`/`home`) → (`products`/`categories`) → `core`. If two features need each other both ways, the shared piece moves to `core/` (see below) rather than making the two features import each other's services.
+  - Within the former "catalog" area, the granular dependency graph is: `products → categories`, `variants → products`, `collections → products`, `banners → products, categories, collections`, `home → collections, banners`. No feature in this graph is depended on by anything it itself depends on.
+  - Two read-only exceptions exist where making a dependency "correct" would have created a cycle: `categories/repository.ts` queries the `products` table directly (`countActiveProductsByCategory`, for `deleteCategory`'s guard) instead of calling into `products`' service, since `products` already depends on `categories` for FK validation. `products/repository.ts` queries the `product_variants` table directly (`findVariantBySku`, for its own nested-create SKU pre-check) instead of calling into `variants`' service, since `variants` already depends on `products` for existence checks. Both are narrow, read-only, single-purpose queries against the shared Prisma client — not an import of the other feature's repository or service module.
 - **One `PrismaClient` instance**, exported from `db/prisma.ts` and imported everywhere. Never instantiate a second client.
 
 ---

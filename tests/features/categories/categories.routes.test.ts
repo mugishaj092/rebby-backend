@@ -6,8 +6,8 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '@/app';
 import { signAccessToken } from '@/core/security/jwt';
 import { prisma } from '@/db/prisma';
-import { catalogRepository } from '@/features/catalog/repository';
-import * as catalogService from '@/features/catalog/service';
+import { categoriesRepository } from '@/features/categories/repository';
+import * as categoriesService from '@/features/categories/service';
 import { Prisma } from '@/generated/prisma/client';
 import { StaffRole } from '@/generated/prisma/enums';
 
@@ -19,6 +19,13 @@ function uniqueSlugConflictError(): Prisma.PrismaClientKnownRequestError {
       clientVersion: '7.8.0',
       meta: { target: ['slug'] },
     },
+  );
+}
+
+function p2025Error(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'An operation failed because it depends on one or more records that were required but not found.',
+    { code: 'P2025', clientVersion: '7.8.0' },
   );
 }
 
@@ -35,7 +42,7 @@ function staffToken(role: StaffRole = StaffRole.staff): string {
   });
 }
 
-describe('features/catalog routes', () => {
+describe('features/categories routes', () => {
   const app = createApp();
   const createdCategoryIds: string[] = [];
 
@@ -354,7 +361,7 @@ describe('features/catalog routes', () => {
         data: { isActive: false },
       });
 
-      const tree = await catalogService.getCategoryTree(false);
+      const tree = await categoriesService.getCategoryTree(false);
       const ids = tree.map((node) => node.id);
 
       expect(ids).toContain(hidden.body.data.id);
@@ -364,23 +371,26 @@ describe('features/catalog routes', () => {
   describe('slug collision exhaustion', () => {
     it('rejects with a ConflictError when no unique slug can be generated', async () => {
       const spy = vi
-        .spyOn(catalogRepository, 'findCategoryBySlug')
+        .spyOn(categoriesRepository, 'findCategoryBySlug')
         .mockResolvedValue({ id: randomUUID() } as never);
 
-      const response = await request(app)
-        .post('/api/v1/admin/categories')
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send({ name: uniqueName('AlwaysCollides') });
+      try {
+        const response = await request(app)
+          .post('/api/v1/admin/categories')
+          .set('Authorization', `Bearer ${staffToken()}`)
+          .send({ name: uniqueName('AlwaysCollides') });
 
-      expect(response.status).toBe(409);
-      spy.mockRestore();
+        expect(response.status).toBe(409);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 
   describe('slug uniqueness race guard (TOCTOU between pre-check and write)', () => {
     it('maps a concurrent unique-constraint violation on create to a clean 409, not a raw error', async () => {
       const spy = vi
-        .spyOn(catalogRepository, 'createCategory')
+        .spyOn(categoriesRepository, 'createCategory')
         .mockRejectedValueOnce(uniqueSlugConflictError());
 
       const response = await request(app)
@@ -396,7 +406,7 @@ describe('features/catalog routes', () => {
     it('maps a concurrent unique-constraint violation on update to a clean 409, not a raw error', async () => {
       const created = await createCategoryViaApi();
       const spy = vi
-        .spyOn(catalogRepository, 'updateCategory')
+        .spyOn(categoriesRepository, 'updateCategory')
         .mockRejectedValueOnce(uniqueSlugConflictError());
 
       const response = await request(app)
@@ -411,7 +421,7 @@ describe('features/catalog routes', () => {
 
     it('rethrows a non-P2002 error from the write instead of swallowing it', async () => {
       const spy = vi
-        .spyOn(catalogRepository, 'createCategory')
+        .spyOn(categoriesRepository, 'createCategory')
         .mockRejectedValueOnce(new Error('unexpected db failure'));
 
       const response = await request(app)
@@ -458,7 +468,7 @@ describe('features/catalog routes', () => {
         parentId: parent.body.data.id,
       });
 
-      const results = await catalogRepository.listCategories({});
+      const results = await categoriesRepository.listCategories({});
       const ids = results.map((c) => c.id);
 
       expect(ids).toContain(parent.body.data.id);
@@ -475,7 +485,7 @@ describe('features/catalog routes', () => {
       });
       const outsider = await createCategoryViaApi({ name: uniqueName('VanishingOutsider') });
 
-      const spy = vi.spyOn(catalogRepository, 'findCategoryById').mockImplementation(((
+      const spy = vi.spyOn(categoriesRepository, 'findCategoryById').mockImplementation(((
         id: string,
       ) => {
         if (id === a.body.data.id) {
@@ -484,20 +494,60 @@ describe('features/catalog routes', () => {
         return prisma.category.findUnique({ where: { id } });
       }) as never);
 
-      const response = await request(app)
-        .patch(`/api/v1/admin/categories/${outsider.body.data.id}`)
-        .set('Authorization', `Bearer ${staffToken()}`)
-        .send({ parentId: b.body.data.id });
+      try {
+        const response = await request(app)
+          .patch(`/api/v1/admin/categories/${outsider.body.data.id}`)
+          .set('Authorization', `Bearer ${staffToken()}`)
+          .send({ parentId: b.body.data.id });
 
-      expect(response.status).toBe(200);
-      spy.mockRestore();
+        expect(response.status).toBe(200);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
+  describe('race guard: concurrent delete between existence check and write', () => {
+    it('maps a P2025 on update to a clean 404 instead of an unhandled 500', async () => {
+      const created = await createCategoryViaApi();
+      const spy = vi
+        .spyOn(categoriesRepository, 'updateCategory')
+        .mockRejectedValueOnce(p2025Error());
+
+      try {
+        const response = await request(app)
+          .patch(`/api/v1/admin/categories/${created.body.data.id}`)
+          .set('Authorization', `Bearer ${staffToken()}`)
+          .send({ name: 'Whatever' });
+
+        expect(response.status).toBe(404);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('maps a P2025 on delete to a clean 404 instead of an unhandled 500', async () => {
+      const created = await createCategoryViaApi();
+      const spy = vi
+        .spyOn(categoriesRepository, 'deleteCategory')
+        .mockRejectedValueOnce(p2025Error());
+
+      try {
+        const response = await request(app)
+          .delete(`/api/v1/admin/categories/${created.body.data.id}`)
+          .set('Authorization', `Bearer ${staffToken(StaffRole.manager)}`);
+
+        expect(response.status).toBe(404);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 
   describe('error forwarding', () => {
     it('forwards unexpected listCategories errors to the error handler instead of crashing', async () => {
       const spy = vi
-        .spyOn(catalogService, 'listCategories')
+        .spyOn(categoriesService, 'listCategories')
         .mockRejectedValueOnce(new Error('boom'));
 
       const response = await request(app).get('/api/v1/categories');
@@ -508,7 +558,7 @@ describe('features/catalog routes', () => {
 
     it('forwards unexpected getCategoryTree errors to the error handler instead of crashing', async () => {
       const spy = vi
-        .spyOn(catalogService, 'getCategoryTree')
+        .spyOn(categoriesService, 'getCategoryTree')
         .mockRejectedValueOnce(new Error('boom'));
 
       const response = await request(app).get('/api/v1/categories/tree');
