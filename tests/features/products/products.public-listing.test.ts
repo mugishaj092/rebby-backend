@@ -102,9 +102,7 @@ describe('features/products public listing & detail routes', () => {
       await deactivateProduct(deactivated.body.data.id);
       await softDeleteProductViaApi(softDeleted.body.data.id);
 
-      const response = await request(app).get(
-        `/api/v1/categories/${categoryId}/products?limit=50`,
-      );
+      const response = await request(app).get(`/api/v1/categories/${categoryId}/products?limit=50`);
 
       const ids = (response.body.data.items as { id: string }[]).map((item) => item.id);
       expect(ids).toContain(active.body.data.id);
@@ -124,13 +122,18 @@ describe('features/products public listing & detail routes', () => {
       const items = response.body.data.items as { id: string; inStock: boolean }[];
 
       expect(items.find((item) => item.id === inStockProduct.body.data.id)?.inStock).toBe(true);
-      expect(items.find((item) => item.id === outOfStockProduct.body.data.id)?.inStock).toBe(
-        false,
-      );
+      expect(items.find((item) => item.id === outOfStockProduct.body.data.id)?.inStock).toBe(false);
     });
 
     it('rejects an invalid limit', async () => {
       const response = await request(app).get('/api/v1/products?limit=0');
+      expect(response.status).toBe(422);
+    });
+
+    it('rejects supplying both categoryId and collectionId', async () => {
+      const response = await request(app).get(
+        `/api/v1/products?categoryId=${randomUUID()}&collectionId=${randomUUID()}`,
+      );
       expect(response.status).toBe(422);
     });
   });
@@ -265,9 +268,7 @@ describe('features/products public listing & detail routes', () => {
       expect(secondPage.body.data.nextCursor).toBeNull();
 
       const firstPageIds = (firstPage.body.data.items as { id: string }[]).map((item) => item.id);
-      const secondPageIds = (secondPage.body.data.items as { id: string }[]).map(
-        (item) => item.id,
-      );
+      const secondPageIds = (secondPage.body.data.items as { id: string }[]).map((item) => item.id);
       const combined = [...firstPageIds, ...secondPageIds];
 
       expect(new Set(combined).size).toBe(25);

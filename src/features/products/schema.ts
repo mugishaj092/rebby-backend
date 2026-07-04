@@ -38,10 +38,15 @@ export const updateProductSchema = z.object({
 
 export const productIdParamsSchema = idParamsSchema;
 
-export const listProductsQuerySchema = cursorPaginationQuerySchema.extend({
-  categoryId: z.string().uuid().optional(),
-  collectionId: z.string().uuid().optional(),
-});
+export const listProductsQuerySchema = cursorPaginationQuerySchema
+  .extend({
+    categoryId: z.string().uuid().optional(),
+    collectionId: z.string().uuid().optional(),
+  })
+  .refine((data) => !(data.categoryId && data.collectionId), {
+    message: 'categoryId and collectionId cannot both be provided',
+    path: ['collectionId'],
+  });
 
 export const productIdOrSlugParamsSchema = z.object({
   idOrSlug: z.string().trim().min(1),

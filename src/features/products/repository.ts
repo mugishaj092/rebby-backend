@@ -162,7 +162,7 @@ export const productsRepository = {
     if (collectionId) {
       const rows = await prisma.collectionProduct.findMany({
         where: { collectionId, product: { isActive: true, deletedAt: null } },
-        orderBy: { sortOrder: 'asc' },
+        orderBy: [{ sortOrder: 'asc' }, { productId: 'asc' }],
         take: limit + 1,
         ...(cursor
           ? { cursor: { collectionId_productId: { collectionId, productId: cursor } }, skip: 1 }
