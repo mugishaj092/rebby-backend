@@ -174,9 +174,10 @@ model Product {
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  category Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  images   ProductImage[]
-  variants ProductVariant[]
+  category    Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  images      ProductImage[]
+  variants    ProductVariant[]
+  collections CollectionProduct[]
 
   @@index([categoryId])
   @@map("products")
@@ -212,4 +213,50 @@ model ProductVariant {
   @@unique([productId, size, color])
   @@index([productId])
   @@map("product_variants")
+}
+
+model Collection {
+  id          String    @id @default(uuid())
+  name        String    @db.VarChar(150)
+  slug        String    @unique @db.VarChar(150)
+  description String?   @db.VarChar(500)
+  isActive    Boolean   @default(true) @map("is_active")
+  startsAt    DateTime? @map("starts_at") @db.Timestamptz(6)
+  endsAt      DateTime? @map("ends_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  products CollectionProduct[]
+
+  @@map("collections")
+}
+
+model CollectionProduct {
+  collectionId String @map("collection_id")
+  productId    String @map("product_id")
+  sortOrder    Int    @default(0) @map("sort_order")
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([collectionId, productId])
+  @@map("collection_products")
+}
+
+model Banner {
+  id        String    @id @default(uuid())
+  title     String    @db.VarChar(191)
+  imageUrl  String    @map("image_url") @db.VarChar(500)
+  linkType  String    @map("link_type") @db.VarChar(30)
+  linkValue String    @map("link_value") @db.VarChar(500)
+  placement String    @db.VarChar(30)
+  sortOrder Int       @default(0) @map("sort_order")
+  isActive  Boolean   @default(true) @map("is_active")
+  startsAt  DateTime? @map("starts_at") @db.Timestamptz(6)
+  endsAt    DateTime? @map("ends_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([placement, isActive])
+  @@map("banners")
 }

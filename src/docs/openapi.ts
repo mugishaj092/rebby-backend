@@ -295,6 +295,124 @@ const categoryWriteRequestBody = (requiredName: boolean) => ({
   },
 });
 
+const collectionIdParam = {
+  name: 'id',
+  in: 'path' as const,
+  required: true,
+  description: 'Collection id',
+  schema: { type: 'string', format: 'uuid' },
+};
+
+const collectionSlugParam = {
+  name: 'slug',
+  in: 'path' as const,
+  required: true,
+  description: 'Collection slug',
+  schema: { type: 'string' },
+};
+
+const bannerIdParam = {
+  name: 'id',
+  in: 'path' as const,
+  required: true,
+  description: 'Banner id',
+  schema: { type: 'string', format: 'uuid' },
+};
+
+const collectionNotFoundResponse = {
+  description: 'No collection with that id/slug',
+  content: { 'application/json': { schema: errorEnvelope('NOT_FOUND', 'Collection not found') } },
+};
+
+const bannerNotFoundResponse = {
+  description: 'No banner with that id',
+  content: { 'application/json': { schema: errorEnvelope('NOT_FOUND', 'Banner not found') } },
+};
+
+const collectionWriteRequestBody = (requiredName: boolean) => ({
+  required: true,
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        ...(requiredName ? { required: ['name'] } : {}),
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 150, example: 'New Arrivals' },
+          slug: {
+            type: 'string',
+            description:
+              'Optional — auto-generated from name (with a numeric suffix on collision) if omitted.',
+            example: 'new-arrivals',
+          },
+          description: { type: 'string', maxLength: 500 },
+          isActive: { type: 'boolean', description: 'Update only.' },
+          startsAt: { type: 'string', format: 'date-time', nullable: true },
+          endsAt: { type: 'string', format: 'date-time', nullable: true },
+          productIds: {
+            type: 'array',
+            items: { type: 'string', format: 'uuid' },
+            description: 'Create only — initial product set, each id must be an active product.',
+          },
+        },
+      },
+    },
+  },
+});
+
+const setCollectionProductsRequestBody = {
+  required: true,
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        required: ['productIds'],
+        properties: {
+          productIds: {
+            type: 'array',
+            items: { type: 'string', format: 'uuid' },
+            description:
+              'Replaces the full product set. Order determines sortOrder. An empty array clears the collection.',
+          },
+        },
+      },
+    },
+  },
+};
+
+const bannerWriteRequestBody = (required: boolean) => ({
+  required: true,
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        ...(required
+          ? { required: ['title', 'imageUrl', 'linkType', 'linkValue', 'placement'] }
+          : {}),
+        properties: {
+          title: { type: 'string', minLength: 1, maxLength: 191, example: 'Flash Deals' },
+          imageUrl: { type: 'string', format: 'uri', maxLength: 500 },
+          linkType: { type: 'string', enum: ['product', 'category', 'collection', 'url'] },
+          linkValue: {
+            type: 'string',
+            description:
+              'The id of the referenced product/category/collection, or a raw URL when linkType is "url".',
+          },
+          placement: { type: 'string', enum: ['homepage', 'campaign'] },
+          sortOrder: { type: 'integer', default: 0 },
+          isActive: { type: 'boolean', description: 'Update only.' },
+          startsAt: { type: 'string', format: 'date-time', nullable: true },
+          endsAt: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            description: 'Must be after startsAt when both are present.',
+          },
+        },
+      },
+    },
+  },
+});
+
 const credentialsRequestBody = {
   required: true,
   content: {
@@ -317,7 +435,7 @@ export const openApiDocument: JsonObject = {
     title: 'REBY API (dev — auth + catalog foundation)',
     version: '0.1.0-dev',
     description:
-      'Hand-written, throwaway OpenAPI doc covering specs 05–07 (health check, self-hosted JWT auth, the temporary /_debug/* routes, Categories, and Products & Variants). Superseded by the real generated spec in spec 35; not for production use. Customer refresh/logout accept the refresh token via cookie (browser) or request body (React Native/Expo — no persistent cookie jar); staff refresh/logout are cookie-only. Use "Try it out" for login first (in the same browser session) so the cookie is present, or pass refreshToken from the login/register response body directly.',
+      'Hand-written, throwaway OpenAPI doc covering specs 05–08 (health check, self-hosted JWT auth, the temporary /_debug/* routes, Categories, Products & Variants, and Collections & Banners). Superseded by the real generated spec in spec 35; not for production use. Customer refresh/logout accept the refresh token via cookie (browser) or request body (React Native/Expo — no persistent cookie jar); staff refresh/logout are cookie-only. Use "Try it out" for login first (in the same browser session) so the cookie is present, or pass refreshToken from the login/register response body directly.',
   },
   paths: {
     '/health': {
@@ -788,7 +906,9 @@ export const openApiDocument: JsonObject = {
           },
           '404': {
             description: 'categoryId does not reference an existing category',
-            content: { 'application/json': { schema: errorEnvelope('NOT_FOUND', 'Category not found') } },
+            content: {
+              'application/json': { schema: errorEnvelope('NOT_FOUND', 'Category not found') },
+            },
           },
           '409': {
             description:
@@ -942,6 +1062,266 @@ export const openApiDocument: JsonObject = {
         },
       },
     },
+    '/api/v1/home': {
+      get: {
+        summary: 'Home-screen sections — active banners grouped by placement + active collections',
+        description:
+          'Public — no auth required. The single read path the mobile app/home screen calls; do not re-derive equivalent banner/collection queries elsewhere.',
+        tags: ['Catalog — Home (public)'],
+        responses: {
+          '200': {
+            description: 'Home sections',
+            content: {
+              'application/json': {
+                schema: successEnvelope({ $ref: '#/components/schemas/HomeSections' }),
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/v1/collections': {
+      get: {
+        summary: 'List active collections',
+        description:
+          'Public — no auth required. Only collections that are isActive and within their startsAt/endsAt window. Does not include each collection’s product set — see the :slug detail route for that.',
+        tags: ['Catalog — Collections (public)'],
+        responses: {
+          '200': {
+            description: 'Active collections',
+            content: {
+              'application/json': {
+                schema: successEnvelope({
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/Collection' },
+                }),
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/v1/collections/{slug}': {
+      get: {
+        summary: 'Get a single active collection with its products',
+        description:
+          'Public — no auth required. 404 if the slug is unknown or outside its active window.',
+        tags: ['Catalog — Collections (public)'],
+        parameters: [collectionSlugParam],
+        responses: {
+          '200': {
+            description: 'The collection with its ordered product set',
+            content: {
+              'application/json': {
+                schema: successEnvelope({ $ref: '#/components/schemas/CollectionWithProducts' }),
+              },
+            },
+          },
+          '404': collectionNotFoundResponse,
+        },
+      },
+    },
+    '/api/v1/admin/collections': {
+      post: {
+        summary: 'Create a collection, optionally with an initial product set (STAFF+)',
+        tags: ['Catalog — Collections (admin)'],
+        security: [{ bearerAuth: [] }],
+        requestBody: collectionWriteRequestBody(true),
+        responses: {
+          '201': {
+            description: 'Created',
+            content: {
+              'application/json': {
+                schema: successEnvelope({ $ref: '#/components/schemas/Collection' }),
+              },
+            },
+          },
+          '404': {
+            description: 'One or more productIds do not reference an active, non-deleted product',
+            content: {
+              'application/json': {
+                schema: errorEnvelope('NOT_FOUND', 'One or more products not found or inactive'),
+              },
+            },
+          },
+          '409': {
+            description: 'Duplicate slug, or no unique slug could be auto-generated',
+            content: {
+              'application/json': {
+                schema: errorEnvelope('CONFLICT', 'A collection with this slug already exists'),
+              },
+            },
+          },
+          '422': validationFailedResponse,
+          ...staffAuthResponses,
+        },
+      },
+    },
+    '/api/v1/admin/collections/{id}': {
+      patch: {
+        summary: 'Update a collection (STAFF+)',
+        description:
+          'All fields optional. Product set is managed separately, via the /products route.',
+        tags: ['Catalog — Collections (admin)'],
+        security: [{ bearerAuth: [] }],
+        parameters: [collectionIdParam],
+        requestBody: collectionWriteRequestBody(false),
+        responses: {
+          '200': {
+            description: 'Updated',
+            content: {
+              'application/json': {
+                schema: successEnvelope({ $ref: '#/components/schemas/Collection' }),
+              },
+            },
+          },
+          '404': collectionNotFoundResponse,
+          '409': {
+            description: 'Duplicate slug',
+            content: {
+              'application/json': {
+                schema: errorEnvelope('CONFLICT', 'A collection with this slug already exists'),
+              },
+            },
+          },
+          '422': validationFailedResponse,
+          ...staffAuthResponses,
+        },
+      },
+      delete: {
+        summary: 'Delete a collection (MANAGER+)',
+        description: 'Cascades to its collection_products join rows.',
+        tags: ['Catalog — Collections (admin)'],
+        security: [{ bearerAuth: [] }],
+        parameters: [collectionIdParam],
+        responses: {
+          '200': {
+            description: 'Deleted',
+            content: {
+              'application/json': {
+                schema: successEnvelope({
+                  type: 'object',
+                  properties: { deleted: { type: 'boolean', example: true } },
+                }),
+              },
+            },
+          },
+          '404': collectionNotFoundResponse,
+          ...staffAuthResponses,
+        },
+      },
+    },
+    '/api/v1/admin/collections/{id}/products': {
+      put: {
+        summary: 'Replace a collection’s full product set (STAFF+)',
+        description:
+          'Atomic delete-then-insert — the join table always reflects exactly the submitted set afterward. Every id must reference an active, non-deleted product; an empty array clears the collection.',
+        tags: ['Catalog — Collections (admin)'],
+        security: [{ bearerAuth: [] }],
+        parameters: [collectionIdParam],
+        requestBody: setCollectionProductsRequestBody,
+        responses: {
+          '200': {
+            description: 'Replaced',
+            content: {
+              'application/json': {
+                schema: successEnvelope({
+                  type: 'object',
+                  properties: { updated: { type: 'boolean', example: true } },
+                }),
+              },
+            },
+          },
+          '404': {
+            description:
+              'The collection does not exist, or one or more productIds do not reference an active, non-deleted product',
+            content: {
+              'application/json': { schema: errorEnvelope('NOT_FOUND', 'Collection not found') },
+            },
+          },
+          '422': validationFailedResponse,
+          ...staffAuthResponses,
+        },
+      },
+    },
+    '/api/v1/admin/banners': {
+      post: {
+        summary: 'Create a banner (STAFF+)',
+        description:
+          'endsAt must be after startsAt when both are present. linkValue must resolve to a real product/category/collection when linkType is not "url".',
+        tags: ['Catalog — Banners (admin)'],
+        security: [{ bearerAuth: [] }],
+        requestBody: bannerWriteRequestBody(true),
+        responses: {
+          '201': {
+            description: 'Created',
+            content: {
+              'application/json': {
+                schema: successEnvelope({ $ref: '#/components/schemas/Banner' }),
+              },
+            },
+          },
+          '404': {
+            description: 'linkValue does not reference an existing product/category/collection',
+            content: {
+              'application/json': {
+                schema: errorEnvelope(
+                  'NOT_FOUND',
+                  'linkValue does not reference an existing product',
+                ),
+              },
+            },
+          },
+          '422': validationFailedResponse,
+          ...staffAuthResponses,
+        },
+      },
+    },
+    '/api/v1/admin/banners/{id}': {
+      patch: {
+        summary: 'Update a banner (STAFF+)',
+        description:
+          'All fields optional. Re-validates linkValue if linkType or linkValue changes.',
+        tags: ['Catalog — Banners (admin)'],
+        security: [{ bearerAuth: [] }],
+        parameters: [bannerIdParam],
+        requestBody: bannerWriteRequestBody(false),
+        responses: {
+          '200': {
+            description: 'Updated',
+            content: {
+              'application/json': {
+                schema: successEnvelope({ $ref: '#/components/schemas/Banner' }),
+              },
+            },
+          },
+          '404': bannerNotFoundResponse,
+          '422': validationFailedResponse,
+          ...staffAuthResponses,
+        },
+      },
+      delete: {
+        summary: 'Delete a banner (MANAGER+)',
+        tags: ['Catalog — Banners (admin)'],
+        security: [{ bearerAuth: [] }],
+        parameters: [bannerIdParam],
+        responses: {
+          '200': {
+            description: 'Deleted',
+            content: {
+              'application/json': {
+                schema: successEnvelope({
+                  type: 'object',
+                  properties: { deleted: { type: 'boolean', example: true } },
+                }),
+              },
+            },
+          },
+          '404': bannerNotFoundResponse,
+          ...staffAuthResponses,
+        },
+      },
+    },
     '/api/v1/_debug/whoami': {
       get: {
         summary: '[throwaway] Echo the authenticated customer',
@@ -1072,7 +1452,10 @@ export const openApiDocument: JsonObject = {
           description: { type: 'string', nullable: true },
           fabric: { type: 'string', nullable: true },
           careInstructions: { type: 'string', nullable: true },
-          basePrice: { type: 'string', description: 'Decimal serialized as a string, e.g. "19.99".' },
+          basePrice: {
+            type: 'string',
+            description: 'Decimal serialized as a string, e.g. "19.99".',
+          },
           compareAtPrice: { type: 'string', nullable: true },
           isActive: { type: 'boolean' },
           createdAt: { type: 'string', format: 'date-time' },
@@ -1119,6 +1502,70 @@ export const openApiDocument: JsonObject = {
             },
           },
         ],
+      },
+      Collection: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          name: { type: 'string' },
+          slug: { type: 'string' },
+          description: { type: 'string', nullable: true },
+          isActive: { type: 'boolean' },
+          startsAt: { type: 'string', format: 'date-time', nullable: true },
+          endsAt: { type: 'string', format: 'date-time', nullable: true },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      CollectionWithProducts: {
+        allOf: [
+          { $ref: '#/components/schemas/Collection' },
+          {
+            type: 'object',
+            properties: {
+              products: {
+                type: 'array',
+                description: 'Ordered by the collection’s sortOrder.',
+                items: { $ref: '#/components/schemas/Product' },
+              },
+            },
+          },
+        ],
+      },
+      Banner: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          title: { type: 'string' },
+          imageUrl: { type: 'string', format: 'uri' },
+          linkType: { type: 'string', enum: ['product', 'category', 'collection', 'url'] },
+          linkValue: { type: 'string' },
+          placement: { type: 'string', enum: ['homepage', 'campaign'] },
+          sortOrder: { type: 'integer' },
+          isActive: { type: 'boolean' },
+          startsAt: { type: 'string', format: 'date-time', nullable: true },
+          endsAt: { type: 'string', format: 'date-time', nullable: true },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      HomeSections: {
+        type: 'object',
+        properties: {
+          banners: {
+            type: 'object',
+            description: 'Active, in-window banners grouped by placement.',
+            additionalProperties: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/Banner' },
+            },
+            example: { homepage: [], campaign: [] },
+          },
+          collections: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/CollectionWithProducts' },
+          },
+        },
       },
     },
   },

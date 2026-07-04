@@ -6,26 +6,44 @@ import { StaffRole } from '@/generated/prisma/enums';
 
 import {
   addVariant,
+  createBanner,
   createCategory,
+  createCollection,
   createProduct,
+  deleteBanner,
   deleteCategory,
+  deleteCollection,
   deleteProduct,
   getCategory,
   getCategoryTree,
+  getCollectionBySlug,
+  getHomeSections,
+  listActiveCollections,
   listCategories,
   removeVariant,
+  updateBanner,
   updateCategory,
+  updateCollection,
+  updateCollectionProducts,
   updateProduct,
   updateVariant,
 } from './controller';
 import {
   addVariantSchema,
+  bannerIdParamsSchema,
   categoryIdParamsSchema,
+  collectionIdParamsSchema,
+  collectionSlugParamsSchema,
+  createBannerSchema,
   createCategorySchema,
+  createCollectionSchema,
   createProductSchema,
   listCategoriesQuerySchema,
   productIdParamsSchema,
+  setCollectionProductsSchema,
+  updateBannerSchema,
   updateCategorySchema,
+  updateCollectionSchema,
   updateProductSchema,
   updateVariantSchema,
   variantIdParamsSchema,
@@ -106,4 +124,72 @@ adminVariantsRouter.delete(
   requireStaff(StaffRole.manager),
   validate(variantIdParamsSchema, 'params'),
   removeVariant,
+);
+
+// Public home-screen read — mounted at /api/v1/home
+export const homeRouter = Router();
+
+homeRouter.get('/', getHomeSections);
+
+// Public catalog reads — mounted at /api/v1/collections
+export const collectionsRouter = Router();
+
+collectionsRouter.get('/', listActiveCollections);
+collectionsRouter.get(
+  '/:slug',
+  validate(collectionSlugParamsSchema, 'params'),
+  getCollectionBySlug,
+);
+
+// Staff-only collection writes — mounted at /api/v1/admin/collections
+export const adminCollectionsRouter = Router();
+
+adminCollectionsRouter.post(
+  '/',
+  requireStaff(StaffRole.staff),
+  validate(createCollectionSchema),
+  createCollection,
+);
+adminCollectionsRouter.patch(
+  '/:id',
+  requireStaff(StaffRole.staff),
+  validate(collectionIdParamsSchema, 'params'),
+  validate(updateCollectionSchema),
+  updateCollection,
+);
+adminCollectionsRouter.put(
+  '/:id/products',
+  requireStaff(StaffRole.staff),
+  validate(collectionIdParamsSchema, 'params'),
+  validate(setCollectionProductsSchema),
+  updateCollectionProducts,
+);
+adminCollectionsRouter.delete(
+  '/:id',
+  requireStaff(StaffRole.manager),
+  validate(collectionIdParamsSchema, 'params'),
+  deleteCollection,
+);
+
+// Staff-only banner writes — mounted at /api/v1/admin/banners
+export const adminBannersRouter = Router();
+
+adminBannersRouter.post(
+  '/',
+  requireStaff(StaffRole.staff),
+  validate(createBannerSchema),
+  createBanner,
+);
+adminBannersRouter.patch(
+  '/:id',
+  requireStaff(StaffRole.staff),
+  validate(bannerIdParamsSchema, 'params'),
+  validate(updateBannerSchema),
+  updateBanner,
+);
+adminBannersRouter.delete(
+  '/:id',
+  requireStaff(StaffRole.manager),
+  validate(bannerIdParamsSchema, 'params'),
+  deleteBanner,
 );

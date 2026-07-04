@@ -76,6 +76,46 @@ interface VariantUpdateData {
   stock?: number;
 }
 
+interface CollectionCreateData {
+  name: string;
+  slug: string;
+  description: string | null;
+  startsAt: Date | null;
+  endsAt: Date | null;
+}
+
+interface CollectionUpdateData {
+  name?: string;
+  slug?: string;
+  description?: string | null;
+  isActive?: boolean;
+  startsAt?: Date | null;
+  endsAt?: Date | null;
+}
+
+interface BannerCreateData {
+  title: string;
+  imageUrl: string;
+  linkType: string;
+  linkValue: string;
+  placement: string;
+  sortOrder: number;
+  startsAt: Date | null;
+  endsAt: Date | null;
+}
+
+interface BannerUpdateData {
+  title?: string;
+  imageUrl?: string;
+  linkType?: string;
+  linkValue?: string;
+  placement?: string;
+  sortOrder?: number;
+  isActive?: boolean;
+  startsAt?: Date | null;
+  endsAt?: Date | null;
+}
+
 export const catalogRepository = {
   createCategory(data: CategoryCreateData) {
     return prisma.category.create({ data });
@@ -179,5 +219,134 @@ export const catalogRepository = {
 
   removeVariant(variantId: string) {
     return prisma.productVariant.delete({ where: { id: variantId } });
+  },
+
+  // ---- Collections & Banners (Spec 08) -------------------------
+
+  createCollection(data: CollectionCreateData) {
+    return prisma.collection.create({ data });
+  },
+
+  updateCollection(id: string, data: CollectionUpdateData) {
+    return prisma.collection.update({ where: { id }, data });
+  },
+
+  deleteCollection(id: string) {
+    return prisma.collection.delete({ where: { id } });
+  },
+
+  findCollectionById(id: string) {
+    return prisma.collection.findUnique({ where: { id } });
+  },
+
+  findCollectionBySlug(slug: string) {
+    return prisma.collection.findUnique({ where: { slug } });
+  },
+
+  setCollectionProducts(collectionId: string, productIds: string[]) {
+    return prisma.$transaction([
+      prisma.collectionProduct.deleteMany({ where: { collectionId } }),
+      prisma.collectionProduct.createMany({
+        data: productIds.map((productId, index) => ({
+          collectionId,
+          productId,
+          sortOrder: index,
+        })),
+      }),
+    ]);
+  },
+
+  listActiveCollections() {
+    const now = new Date();
+    return prisma.collection.findMany({
+      where: {
+        isActive: true,
+        AND: [
+          { OR: [{ startsAt: null }, { startsAt: { lte: now } }] },
+          { OR: [{ endsAt: null }, { endsAt: { gte: now } }] },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  },
+
+  findActiveCollectionBySlugWithProducts(slug: string) {
+    const now = new Date();
+    return prisma.collection.findFirst({
+      where: {
+        slug,
+        isActive: true,
+        AND: [
+          { OR: [{ startsAt: null }, { startsAt: { lte: now } }] },
+          { OR: [{ endsAt: null }, { endsAt: { gte: now } }] },
+        ],
+      },
+      include: {
+        products: {
+          orderBy: { sortOrder: 'asc' },
+          include: { product: true },
+        },
+      },
+    });
+  },
+
+  listActiveCollectionsWithProducts() {
+    const now = new Date();
+    return prisma.collection.findMany({
+      where: {
+        isActive: true,
+        AND: [
+          { OR: [{ startsAt: null }, { startsAt: { lte: now } }] },
+          { OR: [{ endsAt: null }, { endsAt: { gte: now } }] },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        products: {
+          orderBy: { sortOrder: 'asc' },
+          include: { product: true },
+        },
+      },
+    });
+  },
+
+  findActiveProductIds(productIds: string[]) {
+    return prisma.product
+      .findMany({
+        where: { id: { in: productIds }, isActive: true, deletedAt: null },
+        select: { id: true },
+      })
+      .then((rows) => rows.map((row) => row.id));
+  },
+
+  createBanner(data: BannerCreateData) {
+    return prisma.banner.create({ data });
+  },
+
+  updateBanner(id: string, data: BannerUpdateData) {
+    return prisma.banner.update({ where: { id }, data });
+  },
+
+  deleteBanner(id: string) {
+    return prisma.banner.delete({ where: { id } });
+  },
+
+  findBannerById(id: string) {
+    return prisma.banner.findUnique({ where: { id } });
+  },
+
+  listActiveBanners(placement?: string) {
+    const now = new Date();
+    return prisma.banner.findMany({
+      where: {
+        isActive: true,
+        ...(placement !== undefined ? { placement } : {}),
+        AND: [
+          { OR: [{ startsAt: null }, { startsAt: { lte: now } }] },
+          { OR: [{ endsAt: null }, { endsAt: { gte: now } }] },
+        ],
+      },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
+    });
   },
 };

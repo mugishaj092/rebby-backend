@@ -1,15 +1,25 @@
 import { ConflictError, NotFoundError } from '@/core/errors/AppError';
 import { slugify } from '@/core/utils/slugify';
 import { Prisma } from '@/generated/prisma/client';
-import type { Category, Product, ProductVariant } from '@/generated/prisma/client';
+import type {
+  Banner,
+  Category,
+  Collection,
+  Product,
+  ProductVariant,
+} from '@/generated/prisma/client';
 
 import { catalogRepository } from './repository';
 import type {
   AddVariantInput,
+  CreateBannerInput,
   CreateCategoryInput,
+  CreateCollectionInput,
   CreateProductInput,
   ListCategoriesQuery,
+  UpdateBannerInput,
   UpdateCategoryInput,
+  UpdateCollectionInput,
   UpdateProductInput,
   UpdateVariantInput,
 } from './schema';
@@ -240,9 +250,7 @@ function conflictFieldsFromError(err: Prisma.PrismaClientKnownRequestError): str
   }
 
   const driverFields = (
-    err.meta?.driverAdapterError as
-      | { cause?: { constraint?: { fields?: unknown } } }
-      | undefined
+    err.meta?.driverAdapterError as { cause?: { constraint?: { fields?: unknown } } } | undefined
   )?.cause?.constraint?.fields;
   return Array.isArray(driverFields) ? driverFields : [];
 }
@@ -357,12 +365,8 @@ export async function updateProduct(
       ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.fabric !== undefined ? { fabric: input.fabric } : {}),
-      ...(input.careInstructions !== undefined
-        ? { careInstructions: input.careInstructions }
-        : {}),
-      ...(input.basePrice !== undefined
-        ? { basePrice: new Prisma.Decimal(input.basePrice) }
-        : {}),
+      ...(input.careInstructions !== undefined ? { careInstructions: input.careInstructions } : {}),
+      ...(input.basePrice !== undefined ? { basePrice: new Prisma.Decimal(input.basePrice) } : {}),
       ...(input.compareAtPrice !== undefined
         ? { compareAtPrice: new Prisma.Decimal(input.compareAtPrice) }
         : {}),
@@ -447,4 +451,264 @@ export async function removeVariant(_staffId: string, variantId: string): Promis
   }
 
   await catalogRepository.removeVariant(variantId);
+}
+
+// ---- Collections & Banners (Spec 08) ---------------------------
+
+async function generateUniqueCollectionSlug(name: string): Promise<string> {
+  const base = slugify(name);
+  let candidate = base;
+  let suffix = 1;
+
+  while (await catalogRepository.findCollectionBySlug(candidate)) {
+    suffix += 1;
+    candidate = `${base}-${suffix}`;
+    if (suffix > SLUG_COLLISION_MAX_ATTEMPTS) {
+      throw new ConflictError('Unable to generate a unique slug for this collection');
+    }
+  }
+
+  return candidate;
+}
+
+async function assertCollectionSlugAvailable(slug: string): Promise<void> {
+  const existing = await catalogRepository.findCollectionBySlug(slug);
+  if (existing) {
+    throw new ConflictError('A collection with this slug already exists');
+  }
+}
+
+async function assertProductsExist(productIds: string[]): Promise<void> {
+  if (productIds.length === 0) {
+    return;
+  }
+
+  const activeIds = new Set(await catalogRepository.findActiveProductIds(productIds));
+  const missing = productIds.filter((id) => !activeIds.has(id));
+  if (missing.length > 0) {
+    throw new NotFoundError(`One or more products not found or inactive: ${missing.join(', ')}`);
+  }
+}
+
+// The pre-check (findCollectionBySlug) is check-then-act, not atomic — mirrors the same
+// TOCTOU guard already applied to category/product slugs.
+async function runWithCollectionConflictGuard<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw new ConflictError('A collection with this slug already exists');
+    }
+    throw err;
+  }
+}
+
+export async function createCollection(
+  _staffId: string,
+  input: CreateCollectionInput,
+): Promise<Collection> {
+  const slug = input.slug ?? (await generateUniqueCollectionSlug(input.name));
+  if (input.slug) {
+    await assertCollectionSlugAvailable(input.slug);
+  }
+
+  const productIds = input.productIds ?? [];
+  await assertProductsExist(productIds);
+
+  const collection = await runWithCollectionConflictGuard(() =>
+    catalogRepository.createCollection({
+      name: input.name,
+      slug,
+      description: input.description ?? null,
+      startsAt: input.startsAt ?? null,
+      endsAt: input.endsAt ?? null,
+    }),
+  );
+
+  if (productIds.length > 0) {
+    await catalogRepository.setCollectionProducts(collection.id, productIds);
+  }
+
+  return collection;
+}
+
+export async function updateCollection(
+  _staffId: string,
+  id: string,
+  input: UpdateCollectionInput,
+): Promise<Collection> {
+  const collection = await catalogRepository.findCollectionById(id);
+  if (!collection) {
+    throw new NotFoundError('Collection not found');
+  }
+
+  if (input.slug && input.slug !== collection.slug) {
+    await assertCollectionSlugAvailable(input.slug);
+  }
+
+  return runWithCollectionConflictGuard(() =>
+    catalogRepository.updateCollection(id, {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.slug !== undefined ? { slug: input.slug } : {}),
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      ...(input.startsAt !== undefined ? { startsAt: input.startsAt } : {}),
+      ...(input.endsAt !== undefined ? { endsAt: input.endsAt } : {}),
+    }),
+  );
+}
+
+export async function deleteCollection(_staffId: string, id: string): Promise<void> {
+  const collection = await catalogRepository.findCollectionById(id);
+  if (!collection) {
+    throw new NotFoundError('Collection not found');
+  }
+
+  await catalogRepository.deleteCollection(id);
+}
+
+export async function updateCollectionProducts(
+  _staffId: string,
+  collectionId: string,
+  productIds: string[],
+): Promise<void> {
+  const collection = await catalogRepository.findCollectionById(collectionId);
+  if (!collection) {
+    throw new NotFoundError('Collection not found');
+  }
+
+  await assertProductsExist(productIds);
+
+  await catalogRepository.setCollectionProducts(collectionId, productIds);
+}
+
+export function listActiveCollections(): Promise<Collection[]> {
+  return catalogRepository.listActiveCollections();
+}
+
+export interface CollectionWithProducts extends Collection {
+  products: Product[];
+}
+
+export async function getCollectionBySlug(slug: string): Promise<CollectionWithProducts> {
+  const collection = await catalogRepository.findActiveCollectionBySlugWithProducts(slug);
+  if (!collection) {
+    throw new NotFoundError('Collection not found');
+  }
+
+  return {
+    ...collection,
+    products: collection.products.map((entry) => entry.product),
+  };
+}
+
+async function assertBannerLinkValueResolves(linkType: string, linkValue: string): Promise<void> {
+  switch (linkType) {
+    case 'product': {
+      const product = await catalogRepository.findProductById(linkValue);
+      if (!product) {
+        throw new NotFoundError('linkValue does not reference an existing product');
+      }
+      break;
+    }
+    case 'category': {
+      const category = await catalogRepository.findCategoryById(linkValue);
+      if (!category) {
+        throw new NotFoundError('linkValue does not reference an existing category');
+      }
+      break;
+    }
+    case 'collection': {
+      const collection = await catalogRepository.findCollectionById(linkValue);
+      if (!collection) {
+        throw new NotFoundError('linkValue does not reference an existing collection');
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+export async function createBanner(_staffId: string, input: CreateBannerInput): Promise<Banner> {
+  await assertBannerLinkValueResolves(input.linkType, input.linkValue);
+
+  return catalogRepository.createBanner({
+    title: input.title,
+    imageUrl: input.imageUrl,
+    linkType: input.linkType,
+    linkValue: input.linkValue,
+    placement: input.placement,
+    sortOrder: input.sortOrder,
+    startsAt: input.startsAt ?? null,
+    endsAt: input.endsAt ?? null,
+  });
+}
+
+export async function updateBanner(
+  _staffId: string,
+  id: string,
+  input: UpdateBannerInput,
+): Promise<Banner> {
+  const banner = await catalogRepository.findBannerById(id);
+  if (!banner) {
+    throw new NotFoundError('Banner not found');
+  }
+
+  const linkType = input.linkType ?? banner.linkType;
+  const linkValue = input.linkValue ?? banner.linkValue;
+  if (input.linkType !== undefined || input.linkValue !== undefined) {
+    await assertBannerLinkValueResolves(linkType, linkValue);
+  }
+
+  return catalogRepository.updateBanner(id, {
+    ...(input.title !== undefined ? { title: input.title } : {}),
+    ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
+    ...(input.linkType !== undefined ? { linkType: input.linkType } : {}),
+    ...(input.linkValue !== undefined ? { linkValue: input.linkValue } : {}),
+    ...(input.placement !== undefined ? { placement: input.placement } : {}),
+    ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+    ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+    ...(input.startsAt !== undefined ? { startsAt: input.startsAt } : {}),
+    ...(input.endsAt !== undefined ? { endsAt: input.endsAt } : {}),
+  });
+}
+
+export async function deleteBanner(_staffId: string, id: string): Promise<void> {
+  const banner = await catalogRepository.findBannerById(id);
+  if (!banner) {
+    throw new NotFoundError('Banner not found');
+  }
+
+  await catalogRepository.deleteBanner(id);
+}
+
+export interface HomeSections {
+  banners: Record<string, Banner[]>;
+  collections: CollectionWithProducts[];
+}
+
+function groupBannersByPlacement(banners: Banner[]): Record<string, Banner[]> {
+  const grouped: Record<string, Banner[]> = {};
+  for (const banner of banners) {
+    (grouped[banner.placement] ??= []).push(banner);
+  }
+  return grouped;
+}
+
+// The single "home screen" read path — Spec 09 and the mobile app call this rather than
+// re-deriving equivalent banner/collection queries elsewhere.
+export async function getHomeSections(): Promise<HomeSections> {
+  const [banners, collections] = await Promise.all([
+    catalogRepository.listActiveBanners(),
+    catalogRepository.listActiveCollectionsWithProducts(),
+  ]);
+
+  return {
+    banners: groupBannersByPlacement(banners),
+    collections: collections.map((collection) => ({
+      ...collection,
+      products: collection.products.map((entry) => entry.product),
+    })),
+  };
 }

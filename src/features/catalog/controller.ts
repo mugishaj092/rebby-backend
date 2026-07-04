@@ -3,12 +3,20 @@ import { NextFunction, Request, Response } from 'express';
 import * as catalogService from './service';
 import type {
   AddVariantInput,
+  BannerIdParams,
   CategoryIdParams,
+  CollectionIdParams,
+  CollectionSlugParams,
+  CreateBannerInput,
   CreateCategoryInput,
+  CreateCollectionInput,
   CreateProductInput,
   ListCategoriesQuery,
   ProductIdParams,
+  SetCollectionProductsInput,
+  UpdateBannerInput,
   UpdateCategoryInput,
+  UpdateCollectionInput,
   UpdateProductInput,
   UpdateVariantInput,
   VariantIdParams,
@@ -137,11 +145,7 @@ export async function deleteProduct(
   }
 }
 
-export async function addVariant(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> {
+export async function addVariant(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { id } = req.params as unknown as ProductIdParams;
     const input = req.body as AddVariantInput;
@@ -175,6 +179,137 @@ export async function removeVariant(
   try {
     const { id } = req.params as unknown as VariantIdParams;
     await catalogService.removeVariant(req.staff!.id, id);
+    res.status(200).json({ success: true, data: { deleted: true } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ---- Collections & Banners (Spec 08) ---------------------------
+
+export async function getHomeSections(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const sections = await catalogService.getHomeSections();
+    res.status(200).json({ success: true, data: sections });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function listActiveCollections(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const collections = await catalogService.listActiveCollections();
+    res.status(200).json({ success: true, data: collections });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getCollectionBySlug(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { slug } = req.params as unknown as CollectionSlugParams;
+    const collection = await catalogService.getCollectionBySlug(slug);
+    res.status(200).json({ success: true, data: collection });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function createCollection(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const input = req.body as CreateCollectionInput;
+    const collection = await catalogService.createCollection(req.staff!.id, input);
+    res.status(201).json({ success: true, data: collection });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateCollection(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { id } = req.params as unknown as CollectionIdParams;
+    const input = req.body as UpdateCollectionInput;
+    const collection = await catalogService.updateCollection(req.staff!.id, id, input);
+    res.status(200).json({ success: true, data: collection });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteCollection(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { id } = req.params as unknown as CollectionIdParams;
+    await catalogService.deleteCollection(req.staff!.id, id);
+    res.status(200).json({ success: true, data: { deleted: true } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateCollectionProducts(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { id } = req.params as unknown as CollectionIdParams;
+    const { productIds } = req.body as SetCollectionProductsInput;
+    await catalogService.updateCollectionProducts(req.staff!.id, id, productIds);
+    res.status(200).json({ success: true, data: { updated: true } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function createBanner(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const input = req.body as CreateBannerInput;
+    const banner = await catalogService.createBanner(req.staff!.id, input);
+    res.status(201).json({ success: true, data: banner });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateBanner(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params as unknown as BannerIdParams;
+    const input = req.body as UpdateBannerInput;
+    const banner = await catalogService.updateBanner(req.staff!.id, id, input);
+    res.status(200).json({ success: true, data: banner });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteBanner(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params as unknown as BannerIdParams;
+    await catalogService.deleteBanner(req.staff!.id, id);
     res.status(200).json({ success: true, data: { deleted: true } });
   } catch (err) {
     next(err);
