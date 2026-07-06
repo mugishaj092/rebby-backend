@@ -1,5 +1,8 @@
 import { NextFunction, Request, Response } from 'express';
 
+import type { CursorPaginationQuery } from '@/core/validation/pagination';
+import * as productsService from '@/features/products/service';
+
 import * as collectionsService from './service';
 import type {
   CollectionIdParams,
@@ -74,6 +77,24 @@ export async function deleteCollection(
     const { id } = req.params as unknown as CollectionIdParams;
     await collectionsService.deleteCollection(req.staff!.id, id);
     res.status(200).json({ success: true, data: { deleted: true } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Mounted at /api/v1/collections/:slug/products — a thin wrapper resolving the slug then
+// delegating to products.service.listProducts, per spec 09's "do not duplicate the query logic".
+export async function listCollectionProducts(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { slug } = req.params as unknown as CollectionSlugParams;
+    const { cursor, limit } = req.query as unknown as CursorPaginationQuery;
+    const collectionId = await collectionsService.getCollectionIdBySlug(slug);
+    const page = await productsService.listProducts({ collectionId, cursor, limit });
+    res.status(200).json({ success: true, data: page });
   } catch (err) {
     next(err);
   }

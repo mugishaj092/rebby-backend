@@ -2,12 +2,14 @@ import * as categoriesService from '@/features/categories/service';
 import { ConflictError, NotFoundError } from '@/core/errors/AppError';
 import { conflictFieldsFromError } from '@/core/errors/prismaConflict';
 import { withNotFoundOnP2025 } from '@/core/errors/prismaRaceGuard';
+import type { CursorPage } from '@/core/validation/pagination';
 import { slugify } from '@/core/utils/slugify';
 import { Prisma } from '@/generated/prisma/client';
-import type { Product, ProductVariant } from '@/generated/prisma/client';
+import type { Category, Product, ProductImage, ProductVariant } from '@/generated/prisma/client';
 
+import type { ProductListItem } from './repository';
 import { productsRepository } from './repository';
-import type { CreateProductInput, UpdateProductInput } from './schema';
+import type { CreateProductInput, ListProductsQuery, UpdateProductInput } from './schema';
 
 const SLUG_COLLISION_MAX_ATTEMPTS = 20;
 
@@ -185,4 +187,38 @@ export async function productExists(id: string): Promise<boolean> {
 
 export function findActiveProductIds(productIds: string[]): Promise<string[]> {
   return productsRepository.findActiveProductIds(productIds);
+}
+
+// ---- Public read endpoints (spec 09) ------
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export async function listProducts(query: ListProductsQuery): Promise<CursorPage<ProductListItem>> {
+  const { items, hasMore } = await productsRepository.listProducts(query);
+  return {
+    items,
+    nextCursor: hasMore ? (items[items.length - 1]?.id ?? null) : null,
+  };
+}
+
+export interface ProductDetail extends Product {
+  category: Category | null;
+  images: ProductImage[];
+  variants: ProductVariant[];
+}
+
+// relatedProducts is intentionally out of scope for this spec (belongs to a later
+// discovery/nice-to-have spec) — per spec 09 §2's explicit instruction to leave this marker
+// rather than build it now.
+// TODO(spec: discovery/related-products): compute and attach relatedProducts here.
+export async function getProductDetail(idOrSlug: string): Promise<ProductDetail> {
+  const product = UUID_PATTERN.test(idOrSlug)
+    ? await productsRepository.findPublicProductDetailById(idOrSlug)
+    : await productsRepository.findPublicProductDetailBySlug(idOrSlug);
+
+  if (!product) {
+    throw new NotFoundError('Product not found');
+  }
+
+  return product;
 }

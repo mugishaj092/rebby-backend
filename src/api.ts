@@ -5,7 +5,11 @@ import { adminBannersRouter } from '@/features/banners/routes';
 import { adminCategoriesRouter, categoriesRouter } from '@/features/categories/routes';
 import { adminCollectionsRouter, collectionsRouter } from '@/features/collections/routes';
 import { homeRouter } from '@/features/home/routes';
-import { adminProductsRouter } from '@/features/products/routes';
+import {
+  adminProductsRouter,
+  categoryProductsRouter,
+  productsRouter,
+} from '@/features/products/routes';
 import { adminVariantsRouter, productVariantsRouter } from '@/features/variants/routes';
 
 export const apiRouter = Router();
@@ -13,7 +17,9 @@ export const apiRouter = Router();
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/admin/auth', staffAuthRouter);
 apiRouter.use('/categories', categoriesRouter);
+apiRouter.use('/categories/:id/products', categoryProductsRouter);
 apiRouter.use('/admin/categories', adminCategoriesRouter);
+apiRouter.use('/products', productsRouter);
 apiRouter.use('/admin/products', adminProductsRouter);
 apiRouter.use('/admin/products/:id/variants', productVariantsRouter);
 apiRouter.use('/admin/variants', adminVariantsRouter);

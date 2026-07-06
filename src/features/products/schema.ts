@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { idParamsSchema } from '@/core/validation/idParams';
 import { moneySchema } from '@/core/validation/money';
+import { cursorPaginationQuerySchema } from '@/core/validation/pagination';
 import { slugSchema } from '@/core/validation/slug';
 import { productVariantSchema } from '@/features/variants/schema';
 
@@ -37,6 +38,22 @@ export const updateProductSchema = z.object({
 
 export const productIdParamsSchema = idParamsSchema;
 
+export const listProductsQuerySchema = cursorPaginationQuerySchema
+  .extend({
+    categoryId: z.string().uuid().optional(),
+    collectionId: z.string().uuid().optional(),
+  })
+  .refine((data) => !(data.categoryId && data.collectionId), {
+    message: 'categoryId and collectionId cannot both be provided',
+    path: ['collectionId'],
+  });
+
+export const productIdOrSlugParamsSchema = z.object({
+  idOrSlug: z.string().trim().min(1),
+});
+
 export type CreateProductInput = z.infer<typeof createProductSchema>;
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
 export type ProductIdParams = z.infer<typeof productIdParamsSchema>;
+export type ListProductsQuery = z.infer<typeof listProductsQuerySchema>;
+export type ProductIdOrSlugParams = z.infer<typeof productIdOrSlugParamsSchema>;
