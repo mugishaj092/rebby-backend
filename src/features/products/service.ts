@@ -4,6 +4,7 @@ import { conflictFieldsFromError } from '@/core/errors/prismaConflict';
 import { withNotFoundOnP2025 } from '@/core/errors/prismaRaceGuard';
 import type { CursorPage } from '@/core/validation/pagination';
 import { slugify } from '@/core/utils/slugify';
+import { toProductFilters } from '@/features/discovery/queryBuilder';
 import { Prisma } from '@/generated/prisma/client';
 import type { Category, Product, ProductImage, ProductVariant } from '@/generated/prisma/client';
 
@@ -194,7 +195,13 @@ export function findActiveProductIds(productIds: string[]): Promise<string[]> {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function listProducts(query: ListProductsQuery): Promise<CursorPage<ProductListItem>> {
-  const { items, hasMore } = await productsRepository.listProducts(query);
+  const { items, hasMore } = await productsRepository.listProducts({
+    collectionId: query.collectionId,
+    filters: toProductFilters(query),
+    sort: query.sort,
+    cursor: query.cursor,
+    limit: query.limit,
+  });
   return {
     items,
     nextCursor: hasMore ? (items[items.length - 1]?.id ?? null) : null,

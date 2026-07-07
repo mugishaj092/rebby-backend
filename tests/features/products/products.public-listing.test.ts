@@ -315,7 +315,13 @@ describe('features/products public listing & detail routes', () => {
         .mockResolvedValueOnce({ items: [], hasMore: true });
 
       try {
-        const page = await productsService.listProducts({ limit: 20 });
+        const page = await productsService.listProducts({
+          limit: 20,
+          availability: 'all',
+          newArrivals: false,
+          onSale: false,
+          sort: 'newest',
+        });
         expect(page.nextCursor).toBeNull();
       } finally {
         spy.mockRestore();

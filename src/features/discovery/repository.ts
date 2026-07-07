@@ -2,6 +2,15 @@ import { prisma } from '@/db/prisma';
 import { Prisma } from '@/generated/prisma/client';
 import type { ProductListItem } from '@/features/products/repository';
 
+import {
+  buildProductOrderBySql,
+  buildProductWhereSql,
+  buildSearchCursorSql,
+  searchSortValue,
+  type SearchCursorValue,
+} from './queryBuilder';
+import type { ProductFilters, ProductSort } from './types';
+
 // Same select shape as products/repository.ts's private `productListSelect` — duplicated here
 // rather than imported, since that const isn't exported (only the `ProductListItem` type is,
 // which this module reuses via a type-only import per the discovery/products decision log).
@@ -39,8 +48,9 @@ function toListItem(row: ProductListRow): ProductListItem {
 
 interface SearchProductsFilter {
   query: string;
-  afterRank?: number;
-  afterId?: string;
+  filters: ProductFilters;
+  sort: ProductSort;
+  cursor?: SearchCursorValue;
   limit: number;
 }
 
@@ -50,15 +60,15 @@ interface SearchRow {
   slug: string;
   basePrice: string;
   compareAtPrice: string | null;
+  createdAt: Date;
   primaryImageUrl: string | null;
   inStock: boolean;
-  rank: number;
 }
 
 interface SearchProductsResult {
   items: ProductListItem[];
   hasMore: boolean;
-  lastRank: number | null;
+  lastCursor: SearchCursorValue | null;
 }
 
 export interface SkuSearchResult {
@@ -67,47 +77,49 @@ export interface SkuSearchResult {
 }
 
 export const discoveryRepository = {
-  // Ranked full-text search — Prisma's query builder has no `tsvector`/`ts_rank` operators, so
-  // this goes through `$queryRaw`. Ranking isn't monotonic with `id`, so a plain "last-seen id"
-  // cursor (as used by products.listProducts) can't express "continue after this ranked row" —
-  // pagination instead keys off `(rank, id)`, matching the `ORDER BY rank DESC, id ASC` below.
+  // Full-text search — Prisma's query builder has no `tsvector` match operator, so this goes
+  // through `$queryRaw`. `filters`/`sort` are translated by queryBuilder.ts's raw-SQL-flavored
+  // helpers (`buildProductWhereSql`/`buildProductOrderBySql`) so the filter/sort definitions
+  // stay identical to catalog.listProducts's Prisma-native versions, despite the two entry
+  // points needing different fragment shapes. Per spec 11's confirmed default (superseding the
+  // original spec 10 relevance-first behavior), ordering always follows `sort` (default
+  // `newest`) rather than text-match rank — `ProductSort` has no relevance/rank option, so
+  // matching (via `search_vector @@ plainto_tsquery`) and ordering are fully decoupled here.
   async searchProducts({
     query,
-    afterRank,
-    afterId,
+    filters,
+    sort,
+    cursor,
     limit,
   }: SearchProductsFilter): Promise<SearchProductsResult> {
-    const cursorFilter =
-      afterRank !== undefined && afterId !== undefined
-        ? Prisma.sql`AND (rank < ${afterRank} OR (rank = ${afterRank} AND id > ${afterId}))`
-        : Prisma.empty;
+    const filterSql = await buildProductWhereSql(filters);
+    const cursorSql = buildSearchCursorSql(sort, cursor);
+    const orderBySql = buildProductOrderBySql(sort);
 
     const rows = await prisma.$queryRaw<SearchRow[]>`
-      WITH ranked AS (
-        SELECT
-          p.id,
-          p.name,
-          p.slug,
-          p.base_price AS "basePrice",
-          p.compare_at_price AS "compareAtPrice",
-          (
-            SELECT pi.url FROM product_images pi
-            WHERE pi.product_id = p.id
-            ORDER BY pi.is_primary DESC, pi.sort_order ASC
-            LIMIT 1
-          ) AS "primaryImageUrl",
-          EXISTS (
-            SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock > 0
-          ) AS "inStock",
-          ts_rank(p.search_vector, plainto_tsquery('english', ${query})) AS rank
-        FROM products p
-        WHERE p.is_active = true
-          AND p.deleted_at IS NULL
-          AND p.search_vector @@ plainto_tsquery('english', ${query})
-      )
-      SELECT * FROM ranked
-      WHERE 1 = 1 ${cursorFilter}
-      ORDER BY rank DESC, id ASC
+      SELECT
+        p.id,
+        p.name,
+        p.slug,
+        p.base_price AS "basePrice",
+        p.compare_at_price AS "compareAtPrice",
+        p.created_at AS "createdAt",
+        (
+          SELECT pi.url FROM product_images pi
+          WHERE pi.product_id = p.id
+          ORDER BY pi.is_primary DESC, pi.sort_order ASC
+          LIMIT 1
+        ) AS "primaryImageUrl",
+        EXISTS (
+          SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock > 0
+        ) AS "inStock"
+      FROM products p
+      WHERE p.is_active = true
+        AND p.deleted_at IS NULL
+        AND p.search_vector @@ plainto_tsquery('english', ${query})
+        ${filterSql}
+        ${cursorSql}
+      ${orderBySql}
       LIMIT ${limit + 1}
     `;
 
@@ -126,7 +138,7 @@ export const discoveryRepository = {
         inStock: row.inStock,
       })),
       hasMore,
-      lastRank: lastRow ? lastRow.rank : null,
+      lastCursor: lastRow ? { sortValue: searchSortValue(sort, lastRow), id: lastRow.id } : null,
     };
   },
 

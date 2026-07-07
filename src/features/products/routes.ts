@@ -2,7 +2,6 @@ import { Router } from 'express';
 
 import { requireStaff } from '@/core/middleware/requireStaff';
 import { validate } from '@/core/middleware/validate';
-import { cursorPaginationQuerySchema } from '@/core/validation/pagination';
 import { StaffRole } from '@/generated/prisma/enums';
 
 import {
@@ -35,7 +34,7 @@ export const categoryProductsRouter = Router({ mergeParams: true });
 categoryProductsRouter.get(
   '/',
   validate(productIdParamsSchema, 'params'),
-  validate(cursorPaginationQuerySchema, 'query'),
+  validate(listProductsQuerySchema, 'query'),
   listProductsByCategory,
 );
 

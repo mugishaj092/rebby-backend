@@ -1,7 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
 
-import type { CursorPaginationQuery } from '@/core/validation/pagination';
-
 import * as productsService from './service';
 import type {
   CreateProductInput,
@@ -89,8 +87,8 @@ export async function listProductsByCategory(
 ): Promise<void> {
   try {
     const { id } = req.params as unknown as ProductIdParams;
-    const { cursor, limit } = req.query as unknown as CursorPaginationQuery;
-    const page = await productsService.listProducts({ categoryId: id, cursor, limit });
+    const query = req.query as unknown as ListProductsQuery;
+    const page = await productsService.listProducts({ ...query, categoryId: id });
     res.status(200).json({ success: true, data: page });
   } catch (err) {
     next(err);
