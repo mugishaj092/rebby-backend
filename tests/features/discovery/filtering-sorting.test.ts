@@ -33,8 +33,13 @@ describe('spec 11 — filtering & sorting (shared across catalog + discovery)', 
   const app = createApp();
   const createdProductIds: string[] = [];
   const createdCategoryIds: string[] = [];
+  const createdCollectionIds: string[] = [];
 
   afterAll(async () => {
+    await prisma.collectionProduct.deleteMany({
+      where: { collectionId: { in: createdCollectionIds } },
+    });
+    await prisma.collection.deleteMany({ where: { id: { in: createdCollectionIds } } });
     await prisma.productVariant.deleteMany({ where: { productId: { in: createdProductIds } } });
     await prisma.productImage.deleteMany({ where: { productId: { in: createdProductIds } } });
     await prisma.product.deleteMany({ where: { id: { in: createdProductIds } } });
@@ -49,6 +54,18 @@ describe('spec 11 — filtering & sorting (shared across catalog + discovery)', 
       .send({ name: uniqueName('Category') });
     createdCategoryIds.push(response.body.data.id);
     return response.body.data.id as string;
+  }
+
+  async function createCollectionViaApi(overrides: Record<string, unknown> = {}): Promise<{
+    id: string;
+    slug: string;
+  }> {
+    const response = await request(app)
+      .post('/api/v1/admin/collections')
+      .set('Authorization', `Bearer ${staffToken()}`)
+      .send({ name: uniqueName('Collection'), ...overrides });
+    createdCollectionIds.push(response.body.data.id);
+    return { id: response.body.data.id as string, slug: response.body.data.slug as string };
   }
 
   async function createProductViaApi(
@@ -277,6 +294,75 @@ describe('spec 11 — filtering & sorting (shared across catalog + discovery)', 
 
       const ids = (response.body.data.items as { id: string }[]).map((item) => item.id);
       expect(ids.indexOf(second.body.data.id)).toBeLessThan(ids.indexOf(first.body.data.id));
+    });
+  });
+
+  describe('nested-route filter/sort passthrough (regression: params were previously dropped)', () => {
+    it('GET /categories/:id/products honors size/price filters, not just cursor/limit', async () => {
+      const categoryId = await createCategoryViaApi();
+      const matches = await createProductViaApi({
+        categoryId,
+        basePrice: '15.00',
+        variants: [{ size: 'M', color: 'Black', sku: uniqueSku(), stock: 5 }],
+      });
+      const wrongSize = await createProductViaApi({
+        categoryId,
+        basePrice: '15.00',
+        variants: [{ size: 'L', color: 'Black', sku: uniqueSku(), stock: 5 }],
+      });
+
+      const response = await request(app).get(
+        `/api/v1/categories/${categoryId}/products?size=M&minPrice=10&maxPrice=20`,
+      );
+
+      expect(response.status).toBe(200);
+      const ids = (response.body.data.items as { id: string }[]).map((item) => item.id);
+      expect(ids).toContain(matches.body.data.id);
+      expect(ids).not.toContain(wrongSize.body.data.id);
+    });
+
+    it('GET /categories/:id/products honors sort=price_desc', async () => {
+      const categoryId = await createCategoryViaApi();
+      const low = await createProductViaApi({ categoryId, basePrice: '10.00' });
+      const high = await createProductViaApi({ categoryId, basePrice: '30.00' });
+
+      const response = await request(app).get(
+        `/api/v1/categories/${categoryId}/products?sort=price_desc`,
+      );
+
+      const ids = (response.body.data.items as { id: string }[]).map((item) => item.id);
+      expect(ids.indexOf(high.body.data.id)).toBeLessThan(ids.indexOf(low.body.data.id));
+    });
+
+    it('GET /collections/:slug/products honors availability=in_stock while keeping curated sortOrder', async () => {
+      const inStock = await createProductViaApi({
+        variants: [{ size: 'M', color: 'Black', sku: uniqueSku(), stock: 5 }],
+      });
+      const outOfStock = await createProductViaApi({
+        variants: [{ size: 'M', color: 'Black', sku: uniqueSku(), stock: 0 }],
+      });
+      const collection = await createCollectionViaApi({
+        productIds: [outOfStock.body.data.id, inStock.body.data.id],
+      });
+
+      const response = await request(app).get(
+        `/api/v1/collections/${collection.slug}/products?availability=in_stock`,
+      );
+
+      expect(response.status).toBe(200);
+      const ids = (response.body.data.items as { id: string }[]).map((item) => item.id);
+      expect(ids).toContain(inStock.body.data.id);
+      expect(ids).not.toContain(outOfStock.body.data.id);
+    });
+
+    it('GET /collections/:slug/products rejects minPrice greater than maxPrice', async () => {
+      const collection = await createCollectionViaApi();
+
+      const response = await request(app).get(
+        `/api/v1/collections/${collection.slug}/products?minPrice=50&maxPrice=10`,
+      );
+
+      expect(response.status).toBe(422);
     });
   });
 

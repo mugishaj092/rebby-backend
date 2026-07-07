@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { requireStaff } from '@/core/middleware/requireStaff';
 import { validate } from '@/core/middleware/validate';
-import { cursorPaginationQuerySchema } from '@/core/validation/pagination';
+import { listProductsQuerySchema } from '@/features/products/schema';
 import { StaffRole } from '@/generated/prisma/enums';
 
 import {
@@ -29,7 +29,7 @@ collectionsRouter.get('/', listActiveCollections);
 collectionsRouter.get(
   '/:slug/products',
   validate(collectionSlugParamsSchema, 'params'),
-  validate(cursorPaginationQuerySchema, 'query'),
+  validate(listProductsQuerySchema, 'query'),
   listCollectionProducts,
 );
 collectionsRouter.get(
