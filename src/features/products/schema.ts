@@ -4,6 +4,11 @@ import { idParamsSchema } from '@/core/validation/idParams';
 import { moneySchema } from '@/core/validation/money';
 import { cursorPaginationQuerySchema } from '@/core/validation/pagination';
 import { slugSchema } from '@/core/validation/slug';
+import {
+  isValidPriceRange,
+  priceRangeRefinement,
+  productFilterQuerySchema,
+} from '@/features/discovery/schema';
 import { productVariantSchema } from '@/features/variants/schema';
 
 const productImageSchema = z.object({
@@ -39,10 +44,11 @@ export const updateProductSchema = z.object({
 export const productIdParamsSchema = idParamsSchema;
 
 export const listProductsQuerySchema = cursorPaginationQuerySchema
+  .merge(productFilterQuerySchema)
   .extend({
-    categoryId: z.string().uuid().optional(),
     collectionId: z.string().uuid().optional(),
   })
+  .refine(isValidPriceRange, priceRangeRefinement())
   .refine((data) => !(data.categoryId && data.collectionId), {
     message: 'categoryId and collectionId cannot both be provided',
     path: ['collectionId'],

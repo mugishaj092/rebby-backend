@@ -93,7 +93,15 @@ export async function listCollectionProducts(
     const { slug } = req.params as unknown as CollectionSlugParams;
     const { cursor, limit } = req.query as unknown as CursorPaginationQuery;
     const collectionId = await collectionsService.getCollectionIdBySlug(slug);
-    const page = await productsService.listProducts({ collectionId, cursor, limit });
+    const page = await productsService.listProducts({
+      collectionId,
+      cursor,
+      limit,
+      availability: 'all',
+      newArrivals: false,
+      onSale: false,
+      sort: 'newest',
+    });
     res.status(200).json({ success: true, data: page });
   } catch (err) {
     next(err);

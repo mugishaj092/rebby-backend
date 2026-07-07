@@ -90,7 +90,15 @@ export async function listProductsByCategory(
   try {
     const { id } = req.params as unknown as ProductIdParams;
     const { cursor, limit } = req.query as unknown as CursorPaginationQuery;
-    const page = await productsService.listProducts({ categoryId: id, cursor, limit });
+    const page = await productsService.listProducts({
+      categoryId: id,
+      cursor,
+      limit,
+      availability: 'all',
+      newArrivals: false,
+      onSale: false,
+      sort: 'newest',
+    });
     res.status(200).json({ success: true, data: page });
   } catch (err) {
     next(err);

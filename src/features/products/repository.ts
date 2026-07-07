@@ -1,5 +1,7 @@
 import { prisma } from '@/db/prisma';
 import type { Prisma } from '@/generated/prisma/client';
+import { buildProductOrderBy, buildProductWhereClause } from '@/features/discovery/queryBuilder';
+import type { ProductFilters, ProductSort } from '@/features/discovery/types';
 
 interface ProductImageCreateData {
   url: string;
@@ -82,8 +84,9 @@ function toListItem(row: ProductListRow): ProductListItem {
 }
 
 interface ListProductsFilter {
-  categoryId?: string;
   collectionId?: string;
+  filters: ProductFilters;
+  sort: ProductSort;
   cursor?: string;
   limit: number;
 }
@@ -149,19 +152,26 @@ export const productsRepository = {
     return prisma.productVariant.findUnique({ where: { sku } });
   },
 
-  // Two distinct query shapes behind one entry point: a plain product listing (optionally
-  // scoped by category, ordered newest-first) vs. a collection-scoped listing, which must
-  // instead respect `CollectionProduct.sortOrder` (spec 09's acceptance criterion) and so is
-  // queried through the join table with a cursor on its compound `collectionId_productId` key.
+  // Two distinct query shapes behind one entry point: a plain product listing (filtered/sorted
+  // per spec 11's shared `ProductFilters`/`ProductSort`) vs. a collection-scoped listing, which
+  // must instead respect `CollectionProduct.sortOrder` (spec 09's acceptance criterion) and so
+  // is queried through the join table with a cursor on its compound `collectionId_productId`
+  // key. `filters` still narrows the collection-scoped path (e.g. "this collection, in stock,
+  // under 20,000 RWF"), but `sort` does not apply there — curated merchandising order always
+  // wins for a named collection, spec 11 doesn't say otherwise, and dropping it silently would
+  // undo a deliberate spec-09 feature.
   async listProducts({
-    categoryId,
     collectionId,
+    filters,
+    sort,
     cursor,
     limit,
   }: ListProductsFilter): Promise<{ items: ProductListItem[]; hasMore: boolean }> {
+    const where = await buildProductWhereClause(filters);
+
     if (collectionId) {
       const rows = await prisma.collectionProduct.findMany({
-        where: { collectionId, product: { isActive: true, deletedAt: null } },
+        where: { collectionId, product: { isActive: true, deletedAt: null, ...where } },
         orderBy: [{ sortOrder: 'asc' }, { productId: 'asc' }],
         take: limit + 1,
         ...(cursor
@@ -178,12 +188,8 @@ export const productsRepository = {
     }
 
     const rows = await prisma.product.findMany({
-      where: {
-        isActive: true,
-        deletedAt: null,
-        ...(categoryId ? { categoryId } : {}),
-      },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      where: { isActive: true, deletedAt: null, ...where },
+      orderBy: buildProductOrderBy(sort),
       take: limit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       select: productListSelect,
