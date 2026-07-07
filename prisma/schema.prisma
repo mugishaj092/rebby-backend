@@ -174,6 +174,11 @@ model Product {
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(6)
 
+  // Generated column (name weighted 'A', description weighted 'B') + GIN index, added by hand
+  // in the `add_products_search_vector` migration — Prisma can't model a generated `tsvector`
+  // column, so it's declared `Unsupported` purely to stop `migrate dev` from seeing it as drift.
+  searchVector Unsupported("tsvector")? @map("search_vector")
+
   category    Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   images      ProductImage[]
   variants    ProductVariant[]

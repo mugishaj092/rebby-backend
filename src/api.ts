@@ -4,6 +4,7 @@ import { authRouter, debugRouter, staffAuthRouter } from '@/features/auth/routes
 import { adminBannersRouter } from '@/features/banners/routes';
 import { adminCategoriesRouter, categoriesRouter } from '@/features/categories/routes';
 import { adminCollectionsRouter, collectionsRouter } from '@/features/collections/routes';
+import { discoveryRouter } from '@/features/discovery/routes';
 import { homeRouter } from '@/features/home/routes';
 import {
   adminProductsRouter,
@@ -27,4 +28,5 @@ apiRouter.use('/home', homeRouter);
 apiRouter.use('/collections', collectionsRouter);
 apiRouter.use('/admin/collections', adminCollectionsRouter);
 apiRouter.use('/admin/banners', adminBannersRouter);
+apiRouter.use('/search', discoveryRouter);
 apiRouter.use('/_debug', debugRouter);
