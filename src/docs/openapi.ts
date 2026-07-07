@@ -413,6 +413,50 @@ const bannerWriteRequestBody = (required: boolean) => ({
   },
 });
 
+const cursorPageSchema = (itemsSchema: object): object => ({
+  type: 'object',
+  properties: {
+    items: { type: 'array', items: itemsSchema },
+    nextCursor: {
+      type: 'string',
+      nullable: true,
+      description: 'Opaque — pass back verbatim as the cursor query param to fetch the next page.',
+    },
+  },
+});
+
+const searchQueryParam = {
+  name: 'q',
+  in: 'query' as const,
+  required: true,
+  description:
+    '1–100 chars after trimming. Whitespace-only is rejected, not treated as "match everything."',
+  schema: { type: 'string', minLength: 1, maxLength: 100 },
+};
+
+const cursorQueryParam = {
+  name: 'cursor',
+  in: 'query' as const,
+  required: false,
+  description: 'Opaque cursor from a previous page’s nextCursor.',
+  schema: { type: 'string' },
+};
+
+const limitQueryParam = {
+  name: 'limit',
+  in: 'query' as const,
+  required: false,
+  schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+};
+
+const skuParam = {
+  name: 'sku',
+  in: 'path' as const,
+  required: true,
+  description: 'Exact match only — a partial/substring SKU returns no result, not a fuzzy match.',
+  schema: { type: 'string', minLength: 1, maxLength: 100 },
+};
+
 const credentialsRequestBody = {
   required: true,
   content: {
@@ -435,7 +479,7 @@ export const openApiDocument: JsonObject = {
     title: 'REBY API (dev — auth + catalog foundation)',
     version: '0.1.0-dev',
     description:
-      'Hand-written, throwaway OpenAPI doc covering specs 05–08 (health check, self-hosted JWT auth, the temporary /_debug/* routes, Categories, Products & Variants, and Collections & Banners). Superseded by the real generated spec in spec 35; not for production use. Customer refresh/logout accept the refresh token via cookie (browser) or request body (React Native/Expo — no persistent cookie jar); staff refresh/logout are cookie-only. Use "Try it out" for login first (in the same browser session) so the cookie is present, or pass refreshToken from the login/register response body directly.',
+      'Hand-written, throwaway OpenAPI doc covering specs 05–10 (health check, self-hosted JWT auth, the temporary /_debug/* routes, Categories, Products & Variants, Product Detail & Public Listing, Collections & Banners, and Discovery — Search). Superseded by the real generated spec in spec 35; not for production use. Customer refresh/logout accept the refresh token via cookie (browser) or request body (React Native/Expo — no persistent cookie jar); staff refresh/logout are cookie-only. Use "Try it out" for login first (in the same browser session) so the cookie is present, or pass refreshToken from the login/register response body directly.',
   },
   paths: {
     '/health': {
@@ -759,6 +803,28 @@ export const openApiDocument: JsonObject = {
         },
       },
     },
+    '/api/v1/categories/{id}/products': {
+      get: {
+        summary: 'List products in a category (cursor-paginated)',
+        description:
+          'Public — no auth required. Only active, non-deleted products. Same lightweight listing shape and cursor/limit contract as GET /api/v1/products.',
+        tags: ['Catalog — Products (public)'],
+        parameters: [categoryIdParam, cursorQueryParam, limitQueryParam],
+        responses: {
+          '200': {
+            description: 'Matching products',
+            content: {
+              'application/json': {
+                schema: successEnvelope(
+                  cursorPageSchema({ $ref: '#/components/schemas/ProductListItem' }),
+                ),
+              },
+            },
+          },
+          '422': validationFailedResponse,
+        },
+      },
+    },
     '/api/v1/admin/categories': {
       post: {
         summary: 'Create a category (STAFF+)',
@@ -884,6 +950,81 @@ export const openApiDocument: JsonObject = {
             },
           },
           ...staffAuthResponses,
+        },
+      },
+    },
+    '/api/v1/products': {
+      get: {
+        summary: 'List products (cursor-paginated, optionally filtered)',
+        description:
+          'Public — no auth required. Only active, non-deleted products. categoryId and collectionId are mutually exclusive — supplying both is a validation error.',
+        tags: ['Catalog — Products (public)'],
+        parameters: [
+          {
+            name: 'categoryId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', format: 'uuid' },
+          },
+          {
+            name: 'collectionId',
+            in: 'query',
+            required: false,
+            description: 'Respects the collection’s own product sortOrder when provided.',
+            schema: { type: 'string', format: 'uuid' },
+          },
+          cursorQueryParam,
+          limitQueryParam,
+        ],
+        responses: {
+          '200': {
+            description: 'Matching products',
+            content: {
+              'application/json': {
+                schema: successEnvelope(
+                  cursorPageSchema({ $ref: '#/components/schemas/ProductListItem' }),
+                ),
+              },
+            },
+          },
+          '422': {
+            description: 'Invalid limit, or both categoryId and collectionId supplied',
+            content: {
+              'application/json': {
+                schema: errorEnvelope(
+                  'VALIDATION_ERROR',
+                  'categoryId and collectionId cannot both be provided',
+                ),
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/v1/products/{idOrSlug}': {
+      get: {
+        summary: 'Get product detail by id or slug',
+        description:
+          'Public — no auth required. 404 for a nonexistent, inactive, or soft-deleted product. relatedProducts is intentionally out of scope (a later discovery spec).',
+        tags: ['Catalog — Products (public)'],
+        parameters: [
+          {
+            name: 'idOrSlug',
+            in: 'path' as const,
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Full product detail, including category, images, and every variant',
+            content: {
+              'application/json': {
+                schema: successEnvelope({ $ref: '#/components/schemas/ProductDetail' }),
+              },
+            },
+          },
+          '404': productNotFoundResponse,
         },
       },
     },
@@ -1121,6 +1262,29 @@ export const openApiDocument: JsonObject = {
         },
       },
     },
+    '/api/v1/collections/{slug}/products': {
+      get: {
+        summary: 'List a collection’s products (cursor-paginated, respects sortOrder)',
+        description:
+          'Public — no auth required. A thin wrapper that resolves the slug then delegates to the same query as GET /api/v1/products?collectionId=... — same lightweight listing shape and cursor/limit contract.',
+        tags: ['Catalog — Collections (public)'],
+        parameters: [collectionSlugParam, cursorQueryParam, limitQueryParam],
+        responses: {
+          '200': {
+            description: 'The collection’s products, ordered by CollectionProduct.sortOrder',
+            content: {
+              'application/json': {
+                schema: successEnvelope(
+                  cursorPageSchema({ $ref: '#/components/schemas/ProductListItem' }),
+                ),
+              },
+            },
+          },
+          '404': collectionNotFoundResponse,
+          '422': validationFailedResponse,
+        },
+      },
+    },
     '/api/v1/admin/collections': {
       post: {
         summary: 'Create a collection, optionally with an initial product set (STAFF+)',
@@ -1322,6 +1486,64 @@ export const openApiDocument: JsonObject = {
         },
       },
     },
+    '/api/v1/search': {
+      get: {
+        summary: 'Full-text search across product name/description',
+        description:
+          'Public — no auth required. Postgres full-text search (tsvector/ts_rank) with name weighted above description; only active, non-deleted products are matched. Same lightweight listing shape and cursor/limit pagination contract as GET /api/v1/products, but the opaque cursor internally encodes {rank, id} keyset pagination rather than a plain last-seen id, since rank isn’t monotonic with id.',
+        tags: ['Discovery — Search (public)'],
+        parameters: [searchQueryParam, cursorQueryParam, limitQueryParam],
+        responses: {
+          '200': {
+            description: 'Ranked results (name matches rank above description-only matches)',
+            content: {
+              'application/json': {
+                schema: successEnvelope(
+                  cursorPageSchema({ $ref: '#/components/schemas/ProductListItem' }),
+                ),
+              },
+            },
+          },
+          '422': validationFailedResponse,
+        },
+      },
+    },
+    '/api/v1/search/sku/{sku}': {
+      get: {
+        summary: 'Exact SKU lookup',
+        description:
+          'Public — no auth required. "No match" is a valid 200 response (data: null), not a 404 — this is a search endpoint, not a resource-detail one. Never matches an inactive/soft-deleted product’s SKU.',
+        tags: ['Discovery — Search (public)'],
+        parameters: [skuParam],
+        responses: {
+          '200': {
+            description:
+              'The matched product (lightweight shape) and which variant matched, or null',
+            content: {
+              'application/json': {
+                schema: successEnvelope({
+                  type: 'object',
+                  nullable: true,
+                  properties: {
+                    product: { $ref: '#/components/schemas/ProductListItem' },
+                    variant: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'string', format: 'uuid' },
+                        size: { type: 'string' },
+                        color: { type: 'string' },
+                        sku: { type: 'string' },
+                      },
+                    },
+                  },
+                }),
+              },
+            },
+          },
+          '422': validationFailedResponse,
+        },
+      },
+    },
     '/api/v1/_debug/whoami': {
       get: {
         summary: '[throwaway] Echo the authenticated customer',
@@ -1463,6 +1685,22 @@ export const openApiDocument: JsonObject = {
           deletedAt: { type: 'string', format: 'date-time', nullable: true },
         },
       },
+      ProductListItem: {
+        type: 'object',
+        description: 'The lightweight shape shared by every product listing/search endpoint.',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          name: { type: 'string' },
+          slug: { type: 'string' },
+          basePrice: {
+            type: 'string',
+            description: 'Decimal serialized as a string, e.g. "19.99".',
+          },
+          compareAtPrice: { type: 'string', nullable: true },
+          primaryImageUrl: { type: 'string', format: 'uri', nullable: true },
+          inStock: { type: 'boolean' },
+        },
+      },
       ProductImage: {
         type: 'object',
         properties: {
@@ -1494,6 +1732,22 @@ export const openApiDocument: JsonObject = {
           {
             type: 'object',
             properties: {
+              images: { type: 'array', items: { $ref: '#/components/schemas/ProductImage' } },
+              variants: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/ProductVariant' },
+              },
+            },
+          },
+        ],
+      },
+      ProductDetail: {
+        allOf: [
+          { $ref: '#/components/schemas/Product' },
+          {
+            type: 'object',
+            properties: {
+              category: { allOf: [{ $ref: '#/components/schemas/Category' }], nullable: true },
               images: { type: 'array', items: { $ref: '#/components/schemas/ProductImage' } },
               variants: {
                 type: 'array',

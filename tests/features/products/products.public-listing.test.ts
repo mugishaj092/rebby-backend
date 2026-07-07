@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
 import request from 'supertest';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '@/app';
 import { signAccessToken } from '@/core/security/jwt';
 import { prisma } from '@/db/prisma';
+import { productsRepository } from '@/features/products/repository';
+import * as productsService from '@/features/products/service';
 import { StaffRole } from '@/generated/prisma/enums';
 
 function uniqueName(prefix = 'Product'): string {
@@ -136,6 +138,19 @@ describe('features/products public listing & detail routes', () => {
       );
       expect(response.status).toBe(422);
     });
+
+    it('forwards an unexpected repository error to the error handler', async () => {
+      const spy = vi
+        .spyOn(productsRepository, 'listProducts')
+        .mockRejectedValueOnce(new Error('unexpected db failure'));
+
+      try {
+        const response = await request(app).get('/api/v1/products');
+        expect(response.status).toBe(500);
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 
   describe('GET /api/v1/products/:idOrSlug', () => {
@@ -217,6 +232,20 @@ describe('features/products public listing & detail routes', () => {
       expect(ids).toContain(productInA.body.data.id);
       expect(ids).not.toContain(productInB.body.data.id);
     });
+
+    it('forwards an unexpected repository error to the error handler', async () => {
+      const categoryId = await createCategoryViaApi();
+      const spy = vi
+        .spyOn(productsRepository, 'listProducts')
+        .mockRejectedValueOnce(new Error('unexpected db failure'));
+
+      try {
+        const response = await request(app).get(`/api/v1/categories/${categoryId}/products`);
+        expect(response.status).toBe(500);
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 
   describe('GET /api/v1/collections/:slug/products', () => {
@@ -241,6 +270,56 @@ describe('features/products public listing & detail routes', () => {
     it('returns 404 for a nonexistent collection slug', async () => {
       const response = await request(app).get('/api/v1/collections/does-not-exist-slug/products');
       expect(response.status).toBe(404);
+    });
+
+    it('paginates a collection-scoped listing using cursor, same as a plain listing', async () => {
+      const p1 = await createProductViaApi();
+      const p2 = await createProductViaApi();
+      const p3 = await createProductViaApi();
+      const collectionId = await createCollectionViaApi({
+        productIds: [p1.body.data.id, p2.body.data.id, p3.body.data.id],
+      });
+      const collection = await prisma.collection.findUniqueOrThrow({
+        where: { id: collectionId },
+      });
+
+      const firstPage = await request(app).get(
+        `/api/v1/collections/${collection.slug}/products?limit=2`,
+      );
+      expect(firstPage.status).toBe(200);
+      expect(firstPage.body.data.items).toHaveLength(2);
+      expect(firstPage.body.data.nextCursor).not.toBeNull();
+
+      const secondPage = await request(app).get(
+        `/api/v1/collections/${collection.slug}/products?limit=2&cursor=${firstPage.body.data.nextCursor}`,
+      );
+      expect(secondPage.status).toBe(200);
+      expect(secondPage.body.data.items).toHaveLength(1);
+      expect(secondPage.body.data.nextCursor).toBeNull();
+
+      const firstPageIds = (firstPage.body.data.items as { id: string }[]).map((item) => item.id);
+      const secondPageIds = (secondPage.body.data.items as { id: string }[]).map((item) => item.id);
+      expect([...firstPageIds, ...secondPageIds].sort()).toEqual(
+        [p1.body.data.id, p2.body.data.id, p3.body.data.id].sort(),
+      );
+    });
+  });
+
+  describe('productsService.listProducts (unit)', () => {
+    it('falls back nextCursor to null if the repository ever reports hasMore on an empty page', async () => {
+      // Defensive-only branch: in practice `hasMore` can't be true with zero items (hasMore is
+      // rows.length > limit, and limit >= 1), but the fallback exists so a future repository
+      // change can't silently return an invalid cursor.
+      const spy = vi
+        .spyOn(productsRepository, 'listProducts')
+        .mockResolvedValueOnce({ items: [], hasMore: true });
+
+      try {
+        const page = await productsService.listProducts({ limit: 20 });
+        expect(page.nextCursor).toBeNull();
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 
